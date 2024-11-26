@@ -7,9 +7,9 @@ from loguru import logger
 import pandas as pd
 import pyexcel
 
-from util import ls
-from jsonl import dataframe_to_json_list, load_json, load_json_list, save_json_list
-from xls2xlsx import is_xslx
+from xlin.util import ls
+from xlin.jsonl import dataframe_to_json_list, load_json, load_json_list, save_json_list
+from xlin.xls2xlsx import is_xslx
 
 
 def valid_to_read_as_dataframe(filename: str) -> bool:

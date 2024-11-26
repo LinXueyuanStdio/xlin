@@ -9,7 +9,7 @@ from pathlib import Path
 from tqdm import tqdm
 from loguru import logger
 
-from jsonl import dataframe_to_json_list, load_json_list, save_json_list, load_json, save_json
+from xlin.jsonl import dataframe_to_json_list, load_json_list, save_json_list, load_json, save_json
 
 
 cpu_count = multiprocessing.cpu_count()
