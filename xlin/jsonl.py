@@ -47,6 +47,28 @@ def jsonlist_to_dataframe(json_list: List[Dict[str, str]]):
     return pd.DataFrame(json_list)
 
 
+def is_jsonl(filepath: str):
+    with open(filepath) as f:
+        try:
+            l = next(f)  # 读取一行，用来判断文件是json还是jsonl格式
+            f.seek(0)
+        except:
+            return False
+
+        try:
+            _ = json.loads(l)
+        except ValueError:
+            return False  # 第一行不是json，所以是json格式
+        else:
+            return True  # 第一行是json，所以是jsonl格式
+
+
+def load_json_or_jsonl(filepath: str):
+    if is_jsonl(filepath):
+        return load_json_list(filepath)
+    return load_json(filepath)
+
+
 def load_json(filename: str):
     with open(filename, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -66,6 +88,8 @@ def load_json_list(filename: str):
             try:
                 obj = json.loads(i.strip())
             except:
+                print("格式损坏数据，无法加载")
+                print(i)
                 continue
             json_list.append(obj)
         return json_list
