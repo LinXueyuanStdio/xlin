@@ -12,18 +12,11 @@ from loguru import logger
 from xlin.jsonl import dataframe_to_json_list, load_json_list, save_json_list, load_json, save_json
 
 
-cpu_count = multiprocessing.cpu_count()
-# pool = ThreadPool(cpu_count)  # 大模型接口辣鸡，太快会截断答案
-thread_pool_size = int(os.getenv("THREAD_POOL_SIZE", 5))
-pool = ThreadPool(thread_pool_size)
-logger.debug(f"pool size: {thread_pool_size}, cpu count: {cpu_count}")
-
-
 def multiprocessing_mapping_jsonlist(
     jsonlist: List[Any],
     output_path: Optional[Union[str, Path]],
     partial_func,
-    batch_size=cpu_count * 2,
+    batch_size=multiprocessing.cpu_count(),
     cache_batch_num=1,
     thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
 ):
@@ -47,7 +40,7 @@ def multiprocessing_mapping_jsonlist(
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
     pool = ThreadPool(thread_pool_size)
-    logger.debug(f"pool size: {thread_pool_size}, cpu count: {cpu_count}")
+    logger.debug(f"pool size: {thread_pool_size}, cpu count: {multiprocessing.cpu_count()}")
     start_time = time.time()
     last_save_time = start_time
     for i, line in tqdm(list(enumerate(jsonlist))):
@@ -78,7 +71,7 @@ def multiprocessing_mapping(
     df: pd.DataFrame,
     output_path: Optional[Union[str, Path]],
     partial_func,
-    batch_size=cpu_count * 2,
+    batch_size=multiprocessing.cpu_count(),
     cache_batch_num=1,
     thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
 ):
@@ -104,7 +97,7 @@ def multiprocessing_mapping(
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
     pool = ThreadPool(thread_pool_size)
-    logger.debug(f"pool size: {thread_pool_size}, cpu count: {cpu_count}")
+    logger.debug(f"pool size: {thread_pool_size}, cpu count: {multiprocessing.cpu_count()}")
     start_time = time.time()
     last_save_time = start_time
     for i, line in tqdm(list(df.iterrows())):
@@ -135,27 +128,49 @@ def multiprocessing_mapping(
     return output_df, output_list
 
 
-def dataframe_by_row_mapping(
+def dataframe_with_row_mapping(
     df: pd.DataFrame,
-    mapping_func: Callable[[dict], Tuple[bool, dict]],
+    mapping_func: Callable[[Tuple[int, dict]], Tuple[bool, dict]],
     use_multiprocessing=True,
     thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
 ):
     rows = []
     if use_multiprocessing:
         pool = ThreadPool(thread_pool_size)
-        logger.debug(f"pool size: {thread_pool_size}, cpu count: {cpu_count}")
-        results = pool.map(mapping_func, dataframe_to_json_list(df))
+        logger.debug(f"pool size: {thread_pool_size}, cpu count: {multiprocessing.cpu_count()}")
+        results = pool.map(mapping_func, enumerate(dataframe_to_json_list(df)))
         for ok, row in results:
             if ok:
                 rows.append(row)
     else:
-        for i, row in df.iterrows():
-            ok, row = mapping_func(row)
+        for i, row in tqdm(df.iterrows()):
+            ok, row = mapping_func(i, row)
             if ok:
                 rows.append(row)
     df = pd.DataFrame(rows)
     return df
+
+
+def list_with_element_mapping(
+    iterator: List[Any],
+    mapping_func: Callable[[Tuple[int, Any]], Tuple[bool, Any]],
+    use_multiprocessing=True,
+    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
+):
+    rows = []
+    if use_multiprocessing:
+        pool = ThreadPool(thread_pool_size)
+        logger.debug(f"pool size: {thread_pool_size}, cpu count: {multiprocessing.cpu_count()}")
+        results = pool.map(mapping_func, enumerate(iterator))
+        for ok, row in results:
+            if ok:
+                rows.append(row)
+    else:
+        for i, row in tqdm(enumerate(iterator)):
+            ok, row = mapping_func(i, row)
+            if ok:
+                rows.append(row)
+    return rows
 
 
 def continue_run(
