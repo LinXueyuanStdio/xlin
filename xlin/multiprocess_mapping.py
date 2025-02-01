@@ -9,7 +9,61 @@ from pathlib import Path
 from tqdm import tqdm
 from loguru import logger
 
-from xlin.jsonl import dataframe_to_json_list, load_json_list, save_json_list, load_json, save_json
+from xlin.jsonl import load_json_list, save_json_list, load_json, save_json
+from xlin.util import ls
+
+
+def element_mapping(
+    iterator: List[Any],
+    mapping_func: Callable[[Any], Tuple[bool, Any]],
+    use_multiprocessing=True,
+    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
+):
+    rows = []
+    if use_multiprocessing:
+        pool = ThreadPool(thread_pool_size)
+        results = pool.map(mapping_func, iterator)
+        for ok, row in results:
+            if ok:
+                rows.append(row)
+    else:
+        for row in tqdm(iterator):
+            ok, row = mapping_func(row)
+            if ok:
+                rows.append(row)
+    return rows
+
+
+def batch_mapping(
+    iterator: List[Any],
+    mapping_func: Callable[[List[Any]], Tuple[bool, List[Any]]],
+    use_multiprocessing=True,
+    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
+    batch_size=4,
+):
+    batch_iterator = []
+    batch = []
+    for i, item in enumerate(iterator):
+        batch.append(item)
+        if len(batch) == batch_size:
+            batch_iterator.append(batch)
+            batch = []
+    if len(batch) > 0:
+        batch_iterator.append(batch)
+    rows = element_mapping(batch_iterator, mapping_func, use_multiprocessing, thread_pool_size)
+    rows = [row for batch in rows for row in batch]
+    return rows
+
+
+def dataframe_with_row_mapping(
+    df: pd.DataFrame,
+    mapping_func: Callable[[dict], Tuple[bool, dict]],
+    use_multiprocessing=True,
+    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
+):
+    rows = element_mapping(df.iterrows(), lambda x: mapping_func(x[1]), use_multiprocessing, thread_pool_size)
+    df = pd.DataFrame(rows)
+    return df
 
 
 def multiprocessing_mapping_jsonlist(
@@ -128,51 +182,6 @@ def multiprocessing_mapping(
     return output_df, output_list
 
 
-def dataframe_with_row_mapping(
-    df: pd.DataFrame,
-    mapping_func: Callable[[Tuple[int, dict]], Tuple[bool, dict]],
-    use_multiprocessing=True,
-    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
-):
-    rows = []
-    if use_multiprocessing:
-        pool = ThreadPool(thread_pool_size)
-        logger.debug(f"pool size: {thread_pool_size}, cpu count: {multiprocessing.cpu_count()}")
-        results = pool.map(mapping_func, enumerate(dataframe_to_json_list(df)))
-        for ok, row in results:
-            if ok:
-                rows.append(row)
-    else:
-        for i, row in tqdm(df.iterrows()):
-            ok, row = mapping_func(i, row)
-            if ok:
-                rows.append(row)
-    df = pd.DataFrame(rows)
-    return df
-
-
-def list_with_element_mapping(
-    iterator: List[Any],
-    mapping_func: Callable[[Tuple[int, Any]], Tuple[bool, Any]],
-    use_multiprocessing=True,
-    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
-):
-    rows = []
-    if use_multiprocessing:
-        pool = ThreadPool(thread_pool_size)
-        logger.debug(f"pool size: {thread_pool_size}, cpu count: {multiprocessing.cpu_count()}")
-        results = pool.map(mapping_func, enumerate(iterator))
-        for ok, row in results:
-            if ok:
-                rows.append(row)
-    else:
-        for i, row in tqdm(enumerate(iterator)):
-            ok, row = mapping_func(i, row)
-            if ok:
-                rows.append(row)
-    return rows
-
-
 def continue_run(
     jsonfiles: List[str],
     save_dir: str,
@@ -185,8 +194,7 @@ def continue_run(
     save_dir: Path = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     new_jsonfiles = []
-    for jsonfile in jsonfiles:
-        jsonfile = Path(jsonfile)
+    for jsonfile in ls(jsonfiles):
         jsonlist = load_func(jsonfile)
         output_filepath = save_dir / jsonfile.name
         for row in jsonlist:
