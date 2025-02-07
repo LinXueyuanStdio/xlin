@@ -23,6 +23,7 @@ def element_mapping(
     if use_multiprocessing:
         pool = ThreadPool(thread_pool_size)
         results = pool.map(mapping_func, iterator)
+        pool.close()
         for ok, row in results:
             if ok:
                 rows.append(row)
@@ -116,6 +117,7 @@ def multiprocessing_mapping_jsonlist(
     if len(tmp_list) > 0:
         results = pool.map(partial_func, tmp_list)
         output_list.extend([x for x in results])
+    pool.close()
     if need_caching:
         save_json_list(output_list, output_path)
     return output_list
@@ -176,6 +178,7 @@ def multiprocessing_mapping(
     if len(tmp_list) > 0:
         results = pool.map(partial_func, tmp_list)
         output_list.extend([x for x in results])
+    pool.close()
     output_df = pd.DataFrame(output_list)
     if need_caching:
         output_df.to_excel(output_path, index=False)
