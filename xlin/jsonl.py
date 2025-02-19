@@ -62,6 +62,10 @@ def is_jsonl(filepath: str):
         else:
             return True  # 第一行是json，所以是jsonl格式
 
+def load_text(filename):
+    with open(filename, 'r') as f:
+        return f.read()
+
 
 def load_json_or_jsonl(filepath: str):
     if is_jsonl(filepath):
