@@ -12,23 +12,23 @@ from xlin.jsonl import dataframe_to_json_list, load_json, load_json_list, save_j
 from xlin.xls2xlsx import is_xslx
 
 
-def valid_to_read_as_dataframe(filename: str) -> bool:
-    suffix_list = [".json", ".jsonl", ".xlsx", "xls", ".csv"]
-    return any([filename.endswith(suffix) for suffix in suffix_list])
-
-
-def read_as_dataframe(filepath: Union[str, Path], sheet_name: Optional[str] = None, fill_empty_str_to_na=True) -> pd.DataFrame:
+def read_as_dataframe(
+    filepath: Union[str, Path],
+    sheet_name: Optional[str] = None,
+    fill_empty_str_to_na=True,
+    filter=lambda x: True,
+) -> pd.DataFrame:
     """
-    读取文件为表格
+    读取文件为表格。如果是文件夹，则读取文件夹下的所有文件为表格并拼接
     """
     filepath = Path(filepath)
     if filepath.is_dir():
-        paths = ls(filepath, expand_all_subdir=True)
+        paths = ls(filepath, filter=filter, expand_all_subdir=True)
         df_list = []
         for path in paths:
             try:
-                df = read_as_dataframe(path, sheet_name, fill_empty_str_to_na)
-                df['数据来源'] = path.name
+                df = read_as_dataframe(path, sheet_name, fill_empty_str_to_na, filter)
+                df["数据来源"] = path.name
             except:
                 df = pd.DataFrame()
             df_list.append(df)
@@ -44,56 +44,64 @@ def read_as_dataframe(filepath: Union[str, Path], sheet_name: Optional[str] = No
             json_list = load_json_list(filepath)
         df = pd.DataFrame(json_list)
     elif filename.endswith(".xlsx"):
-        df = pd.read_excel(filepath) if sheet_name is None else pd.read_excel(filepath, sheet_name)
+        if sheet_name is None:
+            df = pd.read_excel(filepath)
+        else:
+            df = pd.read_excel(filepath, sheet_name)
     elif filename.endswith(".xls"):
         if is_xslx(filepath):
-            df = pd.read_excel(filepath) if sheet_name is None else pd.read_excel(filepath, sheet_name)
+            if sheet_name is None:
+                df = pd.read_excel(filepath)
+            else:
+                df = pd.read_excel(filepath, sheet_name)
         else:
             df = pyexcel.get_sheet(file_name=filepath)
     elif filename.endswith(".csv"):
         df = pd.read_csv(filepath)
+    elif filename.endswith(".parquet"):
+        df = pd.read_parquet(filepath)
+    elif filename.endswith(".feather"):
+        df = pd.read_feather(filepath)
+    elif filename.endswith(".pkl"):
+        df = pd.read_pickle(filepath)
+    elif filename.endswith(".h5"):
+        df = pd.read_hdf(filepath)
+    elif filename.endswith(".txt"):
+        df = pd.read_csv(filepath, delimiter="\t")
+    elif filename.endswith(".tsv"):
+        df = pd.read_csv(filepath, delimiter="\t")
+    elif filename.endswith(".xml"):
+        df = pd.read_xml(filepath)
+    elif filename.endswith(".html"):
+        df = pd.read_html(filepath)[0]
+    elif filename.endswith(".db"):
+        df = pd.read_sql_table(sheet_name, filepath)
     else:
-        raise ValueError(f"Unsupported filetype {filepath}. filetype not in [json, jsonl, xlsx, xls, csv]")
+        raise ValueError(
+            (
+                f"Unsupported filetype {filepath}. filetype not in \n"
+                "[json, jsonl, xlsx, xls, csv, "
+                "parquet, feather, pkl, h5, txt, "
+                "tsv, xml, html, db]"
+            )
+        )
     if fill_empty_str_to_na:
         df.fillna("", inplace=True)
     return df
 
 
-def read_maybe_dir_as_dataframe(filepath: Union[str, Path], sheet_name: Optional[str] = None) -> pd.DataFrame:
-    """
-    input path 可能是文件夹，此时将文件夹下的所有表格拼接到一起返回，要求所有表头一致
-    如果不是文件夹，则为文件，尝试直接读取为表格返回
-    """
-    out_list = list()
-    if not isinstance(filepath, Path):
-        filepath = Path(filepath)
-    if not filepath.exists():
-        raise ValueError(f"Path Not Exist: {filepath}")
-    if not filepath.is_dir():
-        return read_as_dataframe(filepath, sheet_name)
-
-    files = os.listdir(filepath)
-    for file_name in files:
-        if not valid_to_read_as_dataframe(file_name):
-            continue
-        input_file = filepath / file_name
-        df = read_as_dataframe(input_file, sheet_name)
-        df.fillna("", inplace=True)
-        for _, line in df.iterrows():
-            line = line.to_dict()
-            out_list.append(line)
-    df = pd.DataFrame(out_list)
-    return df
-
-
-def read_as_dataframe_dict(filepath: Union[str, Path], fill_empty_str_to_na=True):
+def read_as_dataframe_dict(
+    filepath: Union[str, Path],
+    fill_empty_str_to_na=True,
+    filter=lambda x: True,
+):
     filepath = Path(filepath)
     if filepath.is_dir():
-        paths = ls(filepath, expand_all_subdir=True)
+        paths = ls(filepath, filter=filter, expand_all_subdir=True)
         df_dict_list = []
         for path in paths:
             try:
-                df_dict = read_as_dataframe_dict(path, fill_empty_str_to_na)
+                df_dict = read_as_dataframe_dict(path, fill_empty_str_to_na, filter)
             except:
                 df_dict = {}
             df_dict_list.append(df_dict)
@@ -104,11 +112,11 @@ def read_as_dataframe_dict(filepath: Union[str, Path], fill_empty_str_to_na=True
         for name, df in df_dict.items():
             if fill_empty_str_to_na:
                 df.fillna("", inplace=True)
-            df['数据来源'] = filepath.name
+            df["数据来源"] = filepath.name
     elif isinstance(df_dict, pd.DataFrame):
         if fill_empty_str_to_na:
             df_dict.fillna("", inplace=True)
-        df_dict['数据来源'] = filepath.name
+        df_dict["数据来源"] = filepath.name
     return df_dict
 
 
@@ -137,7 +145,10 @@ def save_df_dict(df_dict: Dict[str, pd.DataFrame], output_filepath: Union[str, P
     return output_filepath
 
 
-def save_df_from_jsonlist(jsonlist: List[Dict[str, str]], output_filepath: Union[str, Path]):
+def save_df_from_jsonlist(
+    jsonlist: List[Dict[str, str]],
+    output_filepath: Union[str, Path],
+):
     df = pd.DataFrame(jsonlist)
     return save_df(df, output_filepath)
 
@@ -150,7 +161,9 @@ def save_df(df: pd.DataFrame, output_filepath: Union[str, Path]):
     return output_filepath
 
 
-def lazy_build_dataframe(name: str, output_filepath: Path, func, filetype: str = "xlsx"):
+def lazy_build_dataframe(
+    name: str, output_filepath: Path, func, filetype: str = "xlsx"
+):
     logger.info(name)
     output_filepath.parent.mkdir(parents=True, exist_ok=True)
     if output_filepath.exists():
@@ -161,9 +174,13 @@ def lazy_build_dataframe(name: str, output_filepath: Path, func, filetype: str =
         if filetype == "xlsx":
             df.to_excel(output_filepath.parent / f"{filename}.xlsx", index=False)
         elif filetype == "json":
-            save_json_list(dataframe_to_json_list(df), output_filepath.parent / f"{filename}.json")
+            save_json_list(
+                dataframe_to_json_list(df), output_filepath.parent / f"{filename}.json"
+            )
         elif filetype == "jsonl":
-            save_json_list(dataframe_to_json_list(df), output_filepath.parent / f"{filename}.jsonl")
+            save_json_list(
+                dataframe_to_json_list(df), output_filepath.parent / f"{filename}.jsonl"
+            )
         else:
             logger.warning(f"不认识的 {filetype}，默认保存为 xlsx")
             df.to_excel(output_filepath.parent / f"{filename}.xlsx", index=False)
@@ -171,7 +188,13 @@ def lazy_build_dataframe(name: str, output_filepath: Path, func, filetype: str =
     return df
 
 
-def lazy_build_dataframe_dict(name: str, output_filepath: Path, df_dict: Dict[str, pd.DataFrame], func, skip_sheets: List[str] = list()):
+def lazy_build_dataframe_dict(
+    name: str,
+    output_filepath: Path,
+    df_dict: Dict[str, pd.DataFrame],
+    func: Callable[[str, pd.DataFrame], pd.DataFrame],
+    skip_sheets: List[str] = list(),
+):
     logger.info(name)
     output_filepath.parent.mkdir(parents=True, exist_ok=True)
     if output_filepath.exists():
@@ -193,13 +216,17 @@ def merge_multiple_df_dict(list_of_df_dict: List[Dict[str, pd.DataFrame]], sort=
     for df_dict in list_of_df_dict:
         for k, df in df_dict.items():
             df_dict_merged[k].append(df)
-    df_dict_merged: Dict[str, pd.DataFrame] = {k: pd.concat(v) for k, v in df_dict_merged.items()}
+    df_dict_merged: Dict[str, pd.DataFrame] = {
+        k: pd.concat(v) for k, v in df_dict_merged.items()
+    }
     if sort:
-        df_dict_merged: Dict[str, pd.DataFrame] = {k: df_dict_merged[k] for k in sorted(df_dict_merged)}
+        df_dict_merged: Dict[str, pd.DataFrame] = {
+            k: df_dict_merged[k] for k in sorted(df_dict_merged)
+        }
     return df_dict_merged
 
 
-def remove_duplicate_and_sort(df: pd.DataFrame, key_col="query", sort_by='label'):
+def remove_duplicate_and_sort(df: pd.DataFrame, key_col="query", sort_by="label"):
     query_to_rows = {}
     for i, row in df.iterrows():
         query_to_rows[row[key_col]] = row
@@ -218,16 +245,20 @@ def highlight_max(x):
     return [("background-color: yellow" if m else "") for m in is_max]
 
 
-def split_dataframe(df: pd.DataFrame, output_dir: Union[str, Path], tag: str, split_count=6):
+def split_dataframe(
+    df: pd.DataFrame,
+    output_dir: Union[str, Path],
+    output_filename_prefix: str,
+    split_count=6,
+):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = dataframe_to_json_list(df)
     split_step = len(rows) // split_count + 1
     df_list = []
     for i in range(0, len(rows), split_step):
-        filepath = output_dir / f"{tag}_{i // split_step}.xlsx"
-        df_i = pd.DataFrame(rows[i:i+split_step])
+        filepath = output_dir / f"{output_filename_prefix}_{i // split_step}.xlsx"
+        df_i = pd.DataFrame(rows[i : i + split_step])
         df_i.to_excel(filepath, index=False)
         df_list.append(df_i)
     return df_list
-
