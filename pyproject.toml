@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "xlin"
-version = "0.1.10"
+version = "0.1.12"
 description = "toolbox for LinXueyuan"
 authors = ["XiChen <23211526+LinXueyuanStdio@users.noreply.github.com>"]
 license = "MIT"
@@ -13,6 +13,8 @@ pyexcel = "*"
 pyexcel-xls = "*"
 pyexcel-xlsx = "*"
 xlsxwriter = "*"
+tqdm = "*"
+pyyaml = "*"
 
 [build-system]
 requires = ["poetry-core"]
