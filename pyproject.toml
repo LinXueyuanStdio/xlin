@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "xlin"
-version = "0.1.12"
+version = "0.1.13"
 description = "toolbox for LinXueyuan"
 authors = ["XiChen <23211526+LinXueyuanStdio@users.noreply.github.com>"]
 license = "MIT"
