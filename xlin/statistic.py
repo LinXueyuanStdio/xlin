@@ -57,7 +57,7 @@ def draw_histogram(data: list[int], bins=30, title="Data Distribution Analysis")
     mean = np.mean(data)
     median = np.median(data)
     std = np.std(data)
-    q25, q75 = np.percentile(data, [25, 75])
+    q25, q75, q80, q90 = np.percentile(data, [25, 75, 80, 90])
     data_range = (np.min(data), np.max(data))
 
     # 创建图形和坐标轴
@@ -79,6 +79,8 @@ def draw_histogram(data: list[int], bins=30, title="Data Distribution Analysis")
     # 添加四分位线
     plt.axvline(q25, color="purple", linestyle=":", alpha=0.8, label=f"25th Percentile ({q25:.2f})")
     plt.axvline(q75, color="purple", linestyle=":", alpha=0.8, label=f"75th Percentile ({q75:.2f})")
+    plt.axvline(q80, color="purple", linestyle=":", alpha=0.8, label=f"80th Percentile ({q80:.2f})")
+    plt.axvline(q90, color="purple", linestyle=":", alpha=0.8, label=f"90th Percentile ({q90:.2f})")
 
     # 添加统计摘要
     stats_text = f"""\
