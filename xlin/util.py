@@ -103,32 +103,12 @@ def rm(dir_path: Union[str, Path, List[str], List[Path]], filter: Callable[[Path
     filenames = os.listdir(dir_path)
     for filename in sorted(filenames):
         filepath = dir_path / filename
-        if debug:
-            print("checking", filepath)
-        if filepath.is_dir():
-            paths = ls(filepath, filter, expand_all_subdir)
-            if len(paths) > 0:
-                rm(paths, filter, expand_all_subdir)
-            child = filepath
-            while child.exists() and len(os.listdir(child)) > 0:
-                child = child / os.listdir(child)[0]
-            while child != filepath:
-                if child.exists() and len(os.listdir(child)) == 0:
-                    child.rmdir()
-                    if debug:
-                        print(f"删除空文件夹 {child}")
-                else:
-                    break
-            if filepath.exists() and len(os.listdir(filepath)) == 0:
-                filepath.rmdir()
-                if debug:
-                    print(f"删除空文件夹 {filepath}")
-        elif filter(filepath):
-            rm(filepath, filter, expand_all_subdir)
-    if dir_path.exists() and len(os.listdir(dir_path)) == 0:
-        dir_path.rmdir()
-        if debug:
-            print(f"删除空文件夹 {dir_path}")
+        rm(filepath, filter, expand_all_subdir, debug)
+    if dir_path.exists() and dir_path.is_dir() and len(os.listdir(dir_path)) == 0:
+        if filter(dir_path):
+            dir_path.rmdir()
+            if debug:
+                print(f"删除空文件夹 {dir_path}")
 
 
 def cp(
