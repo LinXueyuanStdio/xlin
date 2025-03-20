@@ -1,4 +1,5 @@
 from typing import List
+from collections import defaultdict
 
 import pandas as pd
 
@@ -116,3 +117,150 @@ def draw_pie(numbers: List[int], title="Pie Chart of Numbers"):
     plt.pie(numbers, labels=[str(i) for i in range(len(numbers))], autopct='%1.1f%%')
     plt.title(title)
     plt.show()
+
+
+def generate_classification_report(predictions: List[str], labels: List[str]) -> dict:
+    """
+    生成包含准确率、混淆矩阵、分类报告等详细评估结果的字典
+
+    Args:
+        predictions: 模型预测结果列表
+        labels: 真实标签列表
+
+    Returns:
+        包含以下结构的字典：
+        - accuracy: 整体准确率
+        - confusion_matrix: 混淆矩阵DataFrame
+        - class_report: 分类报告DataFrame
+        - error_analysis: 错误样本分析DataFrame
+        - total_samples: 总样本数
+        - time_generated: 报告生成时间
+    """
+    # 基础校验
+    assert len(predictions) == len(labels), "预测结果与标签长度不一致"
+
+    # 初始化报告字典
+    report = {}
+
+    # 获取唯一类别
+    classes = sorted(list(set(labels)))
+    error_label = "out_of_class"
+    extend_classes = classes + [error_label]
+
+    # 计算基础指标
+    total = len(labels)
+    correct = sum(p == l for p, l in zip(predictions, labels))
+
+    # 1. 准确率计算
+    report["accuracy"] = correct / total
+
+    # 2. 混淆矩阵构建
+    confusion = defaultdict(int)
+    for true_label, pred_label in zip(labels, predictions):
+        if pred_label not in classes:
+            pred_label = error_label
+        confusion[(true_label, pred_label)] += 1
+
+    confusion_matrix = pd.DataFrame(index=extend_classes, columns=extend_classes, data=0)
+    for (true, pred), count in confusion.items():
+        confusion_matrix.loc[true, pred] = count
+
+    # 3. 分类报告生成
+    micro_tp = 0
+    micro_fp = 0
+    micro_fn = 0
+    class_stats = []
+    for cls in extend_classes:
+        tp = confusion[(cls, cls)]
+        fp = sum(confusion[(other, cls)] for other in extend_classes if other != cls)
+        fn = sum(confusion[(cls, other)] for other in extend_classes if other != cls)
+        micro_tp += tp
+        micro_fp += fp
+        micro_fn += fn
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+        class_stats.append(
+            {
+                "class": cls,
+                "precision": precision,
+                "recall": recall,
+                "f1_score": f1,
+                "support": sum(confusion[(cls, other)] for other in extend_classes),
+            },
+        )
+
+    # 添加汇总统计
+    class_df = pd.DataFrame(class_stats)
+    report["class_report"] = class_df
+    confusion_matrix["recall"] = class_df["recall"].values.tolist()
+    p = class_df["precision"].values.tolist() + [None]
+    tail = pd.DataFrame([p], index=["precision"], columns=confusion_matrix.columns)
+    confusion_matrix = pd.concat([confusion_matrix, tail], axis=0)
+    confusion_matrix.index.name = "True \\ Label"
+    report["confusion_matrix"] = confusion_matrix
+
+    micro_precision = micro_tp / (micro_tp + micro_fp) if (micro_tp + micro_fp) > 0 else 0
+    micro_recall = micro_tp / (micro_tp + micro_fn) if (micro_tp + micro_fn) > 0 else 0
+    micro_f1 = 2 * (micro_precision * micro_recall) / (micro_precision + micro_recall) if (micro_precision + micro_recall) > 0 else 0
+    report["micro_stats"] = {
+        "precision": micro_precision,
+        "recall": micro_recall,
+        "f1_score": micro_f1,
+    }
+    report["macro_stats"] = {
+        "precision": class_df[class_df["class"] != error_label]["precision"].mean(),
+        "recall": class_df[class_df["class"] != error_label]["recall"].mean(),
+        "f1_score": class_df[class_df["class"] != error_label]["f1_score"].mean(),
+    }
+
+    # 4. 元数据信息
+    import datetime
+    report["total_samples"] = total
+    report["time_generated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    return report
+
+
+def print_classification_report(predictions: List[str], labels: List[str]):
+    report = generate_classification_report(predictions, labels)
+    """
+    打印报告内容
+    """
+    print(f"准确率: {report['accuracy']:.2%}")
+    print(f"总样本数: {report['total_samples']}, 生成时间: {report['time_generated']}")
+    print()
+    # 打印微观统计
+    print("=== 微观统计 ===")
+    micro_stats = report["micro_stats"]
+    print(f"准确率: {micro_stats['precision']:.2%}")
+    print(f"召回率: {micro_stats['recall']:.2%}")
+    print(f"F1分数: {micro_stats['f1_score']:.2%}")
+    print()
+    # 打印宏观统计
+    print("=== 宏观统计 ===")
+    macro_stats = report["macro_stats"]
+    print(f"准确率: {macro_stats['precision']:.2%}")
+    print(f"召回率: {macro_stats['recall']:.2%}")
+    print(f"F1分数: {macro_stats['f1_score']:.2%}")
+    print()
+
+    # 打印混淆矩阵
+    print("=== 混淆矩阵 ===")
+    print(report["confusion_matrix"])
+    print()
+
+    # 打印分类报告
+    print("=== 分类报告 ===")
+    print(report["class_report"])
+    print()
+
+
+if __name__ == "__main__":
+    # 示例数据
+    preds = ["cat", "dog", "cat", "dog", "extra1", "extra2"]
+    truth = ["cat", "cat", "dog", "dog", "dog", "dog"]
+
+    print_classification_report(preds, truth)
