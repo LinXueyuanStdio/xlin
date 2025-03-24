@@ -133,10 +133,18 @@ def cp(
             base_input_dir = input_paths[0].parent
     base_input_dir = Path(base_input_dir)
     output_dir_path = Path(output_dir_path)
+    if output_dir_path.exists() and not output_dir_path.is_dir():
+        raise Exception(f"output_dir_path exists and is not a directory: {output_dir_path}")
+    if not output_dir_path.exists():
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+        logger.warning(f"创建文件夹 {output_dir_path}")
+    if not base_input_dir.exists():
+        raise Exception(f"base_input_dir does not exist: {base_input_dir}")
+    if not base_input_dir.is_dir():
+        raise Exception(f"base_input_dir is not a directory: {base_input_dir}")
     for input_path in input_paths:
         relative_path = input_path.relative_to(base_input_dir)
         output_path = output_dir_path / relative_path
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         copy_file(input_path, output_path, force_overwrite, verbose)
 
 
