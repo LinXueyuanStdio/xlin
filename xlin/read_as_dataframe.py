@@ -162,7 +162,10 @@ def save_df(df: pd.DataFrame, output_filepath: Union[str, Path]):
 
 
 def lazy_build_dataframe(
-    name: str, output_filepath: Path, func, filetype: str = "xlsx"
+    name: str,
+    output_filepath: Path,
+    func,
+    filetype: str = "xlsx",
 ):
     logger.info(name)
     output_filepath.parent.mkdir(parents=True, exist_ok=True)
