@@ -4,13 +4,13 @@ import os
 import pyexcel as p
 
 
-def convert_xls_dir_to_xlsx(data_dir):
+def convert_xls_dir_to_xlsx(data_dir: str):
     filenames = os.listdir(data_dir)
     for filename in filenames:
         if filename.endswith(".xls"):
             convert_xls_to_xlsx(os.path.join(data_dir, filename))
 
-def convert_xls_to_xlsx(file_name):
+def convert_xls_to_xlsx(file_name: str) -> str:
     converted_filename = file_name + 'x'
     if is_xslx(file_name):
         # rename to .xlsx
