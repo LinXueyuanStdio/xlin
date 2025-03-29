@@ -221,3 +221,28 @@ def generator_from_paths(paths: List[Path], load_data: Callable[[Path], List[Dic
         jsonlist: List[Dict[str, Any]] = load_data(path)
         for row in jsonlist:
             yield path, row
+
+
+
+def append_to_json_list(data: list[dict], file_path: str):
+    """Append a list of dictionaries to a JSON file."""
+    with open(file_path, "a") as f:
+        for item in data:
+            f.write(json.dumps(item) + "\n")
+
+
+def row_to_json(row: dict) -> dict:
+    """Convert a row to a JSON object."""
+    new_row = {}
+    for k, v in row.items():
+        if isinstance(v, dict):
+            new_row[k] = row_to_json(v)
+        elif isinstance(v, list):
+            new_row[k] = [row_to_json(item) for item in v]
+        elif isinstance(v, pd.DataFrame):
+            new_row[k] = [row_to_json(item) for item in v.to_dict(orient="records")]
+        else:
+            new_row[k] = v
+
+    return new_row
+
