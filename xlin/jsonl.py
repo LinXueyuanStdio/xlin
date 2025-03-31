@@ -246,3 +246,14 @@ def row_to_json(row: dict) -> dict:
 
     return new_row
 
+
+def generator_from_json(path):
+    jsonlist = load_json(path)
+    for line in jsonlist:
+        yield line
+
+
+def generator_from_jsonl(path):
+    jsonlist = load_json_list(path)
+    for line in jsonlist:
+        yield line
