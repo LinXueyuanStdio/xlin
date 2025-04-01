@@ -13,7 +13,7 @@ from xlin.xls2xlsx import is_xslx
 
 
 def read_as_dataframe(
-    filepath: Union[str, Path],
+    filepath: Union[str, Path, list[str], list[Path]],
     sheet_name: Optional[str] = None,
     fill_empty_str_to_na=True,
     filter=lambda x: True,
@@ -21,11 +21,9 @@ def read_as_dataframe(
     """
     读取文件为表格。如果是文件夹，则读取文件夹下的所有文件为表格并拼接
     """
-    filepath = Path(filepath)
-    if filepath.is_dir():
-        paths = ls(filepath, filter=filter, expand_all_subdir=True)
+    if isinstance(filepath, list):
         df_list = []
-        for path in paths:
+        for path in filepath:
             try:
                 df = read_as_dataframe(path, sheet_name, fill_empty_str_to_na, filter)
                 df["数据来源"] = path.name
@@ -36,6 +34,10 @@ def read_as_dataframe(
         if fill_empty_str_to_na:
             df.fillna("", inplace=True)
         return df
+    filepath = Path(filepath)
+    if filepath.is_dir():
+        paths = ls(filepath, filter=filter, expand_all_subdir=True)
+        return read_as_dataframe(paths, sheet_name, fill_empty_str_to_na, filter)
     filename = filepath.name
     if filename.endswith(".json") or filename.endswith(".jsonl"):
         try:
