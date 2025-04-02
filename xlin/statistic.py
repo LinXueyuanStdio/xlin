@@ -19,7 +19,7 @@ def bucket_count(length: List[int], step=50, skip_zero_count=False):
             continue
         if skip_zero_count and j == 0:
             continue
-        print(f"[{(i-1)*step}, {i*step})  {j}   {sum(grouped_count[:i+1])/len(length)*100:.2f}%")
+        print(f"[{(i-1)*step}, {i*step})  {j}   {sum(grouped_count[:i+1])/len(length)*100:.4f}%")
         x.append((i - 1) * step)
         y.append(j)
     return x, y
@@ -73,22 +73,22 @@ def draw_histogram(data: list[int], bins=30, title="Data Distribution Analysis")
     plt.plot(x_vals, kde(x_vals), color="navy", linewidth=2, label="KDE Curve")
 
     # 添加统计线
-    plt.axvline(mean, color="red", linestyle="--", linewidth=2, label=f"Mean ({mean:.2f})")
-    plt.axvline(median, color="green", linestyle="-.", linewidth=2, label=f"Median ({median:.2f})")
-    plt.axvspan(mean - std, mean + std, color="orange", alpha=0.1, label=f"±1 Std.Dev ({std:.2f})")
+    plt.axvline(mean, color="red", linestyle="--", linewidth=2, label=f"Mean ({mean:.4f})")
+    plt.axvline(median, color="green", linestyle="-.", linewidth=2, label=f"Median ({median:.4f})")
+    plt.axvspan(mean - std, mean + std, color="orange", alpha=0.1, label=f"±1 Std.Dev ({std:.4f})")
 
     # 添加四分位线
-    plt.axvline(q25, color="purple", linestyle=":", alpha=0.8, label=f"25th Percentile ({q25:.2f})")
-    plt.axvline(q75, color="purple", linestyle=":", alpha=0.8, label=f"75th Percentile ({q75:.2f})")
-    plt.axvline(q80, color="purple", linestyle=":", alpha=0.8, label=f"80th Percentile ({q80:.2f})")
-    plt.axvline(q90, color="purple", linestyle=":", alpha=0.8, label=f"90th Percentile ({q90:.2f})")
+    plt.axvline(q25, color="purple", linestyle=":", alpha=0.8, label=f"25th Percentile ({q25:.4f})")
+    plt.axvline(q75, color="purple", linestyle=":", alpha=0.8, label=f"75th Percentile ({q75:.4f})")
+    plt.axvline(q80, color="purple", linestyle=":", alpha=0.8, label=f"80th Percentile ({q80:.4f})")
+    plt.axvline(q90, color="purple", linestyle=":", alpha=0.8, label=f"90th Percentile ({q90:.4f})")
 
     # 添加统计摘要
     stats_text = f"""\
-Data Range: [{data_range[0]:.2f}, {data_range[1]:.2f}]
+Data Range: [{data_range[0]:.4f}, {data_range[1]:.4f}]
 Observations: {len(data):,}
-Standard Deviation: {std:.2f}
-IQR: {q75 - q25:.2f}
+Standard Deviation: {std:.4f}
+IQR: {q75 - q25:.4f}
 Skewness: {float((data - mean).mean()**3 / std**3):.4f}
 Kurtosis: {float((data - mean).mean()**4 / std**4):.4f}\
 """
