@@ -199,7 +199,7 @@ def generate_classification_report(predictions: List[str], labels: List[str]) ->
     p = class_df["precision"].values.tolist() + [None]
     tail = pd.DataFrame([p], index=["precision"], columns=confusion_matrix.columns)
     confusion_matrix = pd.concat([confusion_matrix, tail], axis=0)
-    confusion_matrix.index.name = "True \\ Label"
+    confusion_matrix.index.name = "True \\ Pred"
     report["confusion_matrix"] = confusion_matrix
 
     micro_precision = micro_tp / (micro_tp + micro_fp) if (micro_tp + micro_fp) > 0 else 0
