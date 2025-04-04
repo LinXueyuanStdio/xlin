@@ -224,11 +224,16 @@ def generator_from_paths(paths: List[Path], load_data: Callable[[Path], List[Dic
 
 
 
-def append_to_json_list(data: list[dict], file_path: str):
+def append_to_json_list(data: list[dict], file_path: Union[str, Path]):
     """Append a list of dictionaries to a JSON file."""
-    with open(file_path, "a") as f:
+    file_path = Path(file_path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    if file_path.exists() and file_path.is_dir():
+        print(f"{file_path} is a directory, not a file.")
+        return
+    with open(file_path, "a", encoding="utf-8") as f:
         for item in data:
-            f.write(json.dumps(item) + "\n")
+            f.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
 def row_to_json(row: dict) -> dict:
