@@ -15,7 +15,7 @@ from xlin.util import ls
 
 
 def element_mapping(
-    iterator: List[Any],
+    iterator: list[Any],
     mapping_func: Callable[[Any], Tuple[bool, Any]],
     use_multiprocessing=True,
     thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
@@ -41,8 +41,8 @@ def element_mapping(
 
 
 def batch_mapping(
-    iterator: List[Any],
-    mapping_func: Callable[[List[Any]], Tuple[bool, List[Any]]],
+    iterator: list[Any],
+    mapping_func: Callable[[list[Any]], Tuple[bool, list[Any]]],
     use_multiprocessing=True,
     thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
     batch_size=4,
@@ -72,24 +72,26 @@ def dataframe_with_row_mapping(
     return df
 
 
-def multiprocessing_mapping_jsonlist(
-    jsonlist: List[Any],
-    partial_func: Callable[[Any], dict],
+def xmap(
+    jsonlist: list[Any],
+    work_func: Union[Callable[[Any], dict], Callable[[list[Any]], list[dict]]],
     output_path: Optional[Union[str, Path]]=None,  # 输出路径，None表示不缓存
     batch_size=multiprocessing.cpu_count(),
     cache_batch_num=1,
-    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
+    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 8)),
     use_process_pool=True,  # CPU密集型任务时设为True
     preserve_order=True,  # 是否保持结果顺序
     chunksize=None,  # 自动计算最佳分块大小
     retry_count=0,  # 失败重试次数
+    force_overwrite=False,  # 是否强制覆盖输出文件
+    is_batch_work_func=False,  # 是否批量处理函数
 ):
     """高效处理JSON列表，支持多进程/多线程
 
     Args:
-        jsonlist (List[Any]): 要处理的JSON对象列表
+        jsonlist (list[Any]): 要处理的JSON对象列表
         output_path (Optional[Union[str, Path]]): 输出路径，None表示不缓存
-        partial_func (Callable): 处理函数，接收dict返回dict
+        work_func (Callable): 处理函数，接收dict返回dict
         batch_size (int): 批处理大小
         cache_batch_num (int): 缓存批次数量
         thread_pool_size (int): 线程/进程池大小
@@ -110,9 +112,13 @@ def multiprocessing_mapping_jsonlist(
     if need_caching:
         output_path = Path(output_path)
         if output_path.exists():
-            output_list = load_json_list(output_path)
-            start_idx = len(output_list)
-            logger.info(f"继续处理: 已有{start_idx}条记录，共{len(jsonlist)}条")
+            if force_overwrite:
+                logger.warning(f"强制覆盖输出文件: {output_path}")
+                output_path.unlink()
+            else:
+                output_list = load_json_list(output_path)
+                start_idx = len(output_list)
+                logger.info(f"继续处理: 已有{start_idx}条记录，共{len(jsonlist)}条")
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -134,9 +140,13 @@ def multiprocessing_mapping_jsonlist(
         # 批量处理逻辑
         def process_batch(items_batch, retry_remaining=retry_count):
             try:
-                # 选择合适的映射方法
-                map_func = pool.imap_unordered if not preserve_order else pool.imap
-                return list(map_func(partial_func, items_batch, chunksize))
+                if is_batch_work_func:
+                    # 批量处理函数
+                    return work_func(items_batch)
+                else:
+                    # 选择合适的映射方法
+                    map_func = pool.imap_unordered if not preserve_order else pool.imap
+                    return list(map_func(work_func, items_batch, chunksize))
             except Exception as e:
                 if retry_remaining > 0:
                     logger.warning(f"批处理失败，重试中 ({retry_count-retry_remaining+1}/{retry_count}): {e}")
@@ -177,7 +187,8 @@ def multiprocessing_mapping_jsonlist(
     # 最终保存
     if need_caching:
         save_json_list(output_list, output_path)
-        logger.info(f"已完成处理并保存{len(output_list)}条记录")
+    drop_count = len(jsonlist) - len(output_list)
+    logger.info(f"处理完成，共处理{len(jsonlist)}条记录" + ", 丢弃{len(jsonlist) - len(output_list)}条记录" if drop_count > 0 else "")
 
     return output_list
 
