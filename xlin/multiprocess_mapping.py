@@ -85,6 +85,7 @@ def xmap(
     retry_count=0,  # 失败重试次数
     force_overwrite=False,  # 是否强制覆盖输出文件
     is_batch_work_func=False,  # 是否批量处理函数
+    verbose=False,  # 是否打印详细信息
 ):
     """高效处理JSON列表，支持多进程/多线程
 
@@ -113,25 +114,30 @@ def xmap(
         output_path = Path(output_path)
         if output_path.exists():
             if force_overwrite:
-                logger.warning(f"强制覆盖输出文件: {output_path}")
+                if verbose:
+                    logger.warning(f"强制覆盖输出文件: {output_path}")
                 output_path.unlink()
             else:
                 output_list = load_json_list(output_path)
                 start_idx = len(output_list)
-                logger.info(f"继续处理: 已有{start_idx}条记录，共{len(jsonlist)}条")
+                if verbose:
+                    logger.info(f"继续处理: 已有{start_idx}条记录，共{len(jsonlist)}条")
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 选择线程池或进程池
     if use_process_pool:
         pool_cls = multiprocessing.Pool
-        logger.info(f"使用进程池(ProcessPool)，适用于CPU密集型任务")
+        if verbose:
+            logger.info(f"使用进程池(ProcessPool)，适用于CPU密集型任务")
     else:
         pool_cls = ThreadPool
-        logger.info(f"使用线程池(ThreadPool)，适用于IO密集型任务")
+        if verbose:
+            logger.info(f"使用线程池(ThreadPool)，适用于IO密集型任务")
 
     with pool_cls(thread_pool_size) as pool:
-        logger.info(f"池大小: {thread_pool_size}, 批处理大小: {batch_size}, 分块大小: {chunksize}")
+        if verbose:
+            logger.info(f"池大小: {thread_pool_size}, 批处理大小: {batch_size}, 分块大小: {chunksize}")
 
         # 准备要处理的数据
         remaining_items = jsonlist[start_idx:]
@@ -149,10 +155,12 @@ def xmap(
                     return list(map_func(work_func, items_batch, chunksize))
             except Exception as e:
                 if retry_remaining > 0:
-                    logger.warning(f"批处理失败，重试中 ({retry_count-retry_remaining+1}/{retry_count}): {e}")
+                    if verbose:
+                        logger.warning(f"批处理失败，重试中 ({retry_count-retry_remaining+1}/{retry_count}): {e}")
                     return process_batch(items_batch, retry_remaining - 1)
                 else:
-                    logger.error(f"批处理失败: {e}")
+                    if verbose:
+                        logger.error(f"批处理失败: {e}")
                     raise
 
         # 处理数据
@@ -175,20 +183,21 @@ def xmap(
 
                 # 性能统计
                 items_per_second = len(batch) / batch_time if batch_time > 0 else 0
-                pbar.set_postfix_str(f"速率: {items_per_second:.1f}项/秒")
+                pbar.set_postfix_str(f"速率: {items_per_second:.1f} 项/秒")
 
                 # 缓存逻辑
                 if need_caching and (i // batch_size) % cache_batch_num == 0:
                     # 仅当处理速度足够慢时才保存缓存，避免IO成为瓶颈
                     if batch_time > 3 or i + batch_size >= total_items:
                         save_json_list(output_list, output_path)
-                        logger.debug(f"已保存{len(output_list)}条记录到{output_path}")
+                        logger.debug(f"已保存 {len(output_list)} 条记录到 {output_path}")
 
     # 最终保存
     if need_caching:
         save_json_list(output_list, output_path)
-    drop_count = len(jsonlist) - len(output_list)
-    logger.info(f"处理完成，共处理{len(jsonlist)}条记录" + ", 丢弃{len(jsonlist) - len(output_list)}条记录" if drop_count > 0 else "")
+    if verbose:
+        drop_count = len(jsonlist) - len(output_list)
+        logger.info(f"处理完成，共处理 {len(jsonlist)} 条记录" + f", 丢弃 {drop_count} 条记录" if drop_count > 0 else "")
 
     return output_list
 
