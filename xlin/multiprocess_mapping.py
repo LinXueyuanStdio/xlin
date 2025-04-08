@@ -164,7 +164,7 @@ def xmap(
                     raise
 
         # 处理数据
-        with tqdm(total=total_items, desc="处理数据", unit="项") as pbar:
+        with tqdm(total=total_items, desc="Map", unit="examples") as pbar:
             # 跳过已处理的项目
             pbar.update(start_idx)
 
@@ -182,8 +182,7 @@ def xmap(
                 pbar.update(len(batch))
 
                 # 性能统计
-                items_per_second = len(batch) / batch_time if batch_time > 0 else 0
-                pbar.set_postfix_str(f"速率: {items_per_second:.1f} 项/秒")
+                pbar.set_postfix_str(f"{batch_time:.1f} s/batch, {len(results)} examples")
 
                 # 缓存逻辑
                 if need_caching and (i // batch_size) % cache_batch_num == 0:
