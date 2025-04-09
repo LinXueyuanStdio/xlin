@@ -111,11 +111,53 @@ Kurtosis: {float((data - mean).mean()**4 / std**4):.4f}\
     plt.show()
 
 
-def draw_pie(numbers: List[int], title="Pie Chart of Numbers"):
+
+def draw_preds_labels(preds: list[str], labels: list[str]):
+    from collections import Counter
     import matplotlib.pyplot as plt
 
-    plt.pie(numbers, labels=[str(i) for i in range(len(numbers))], autopct='%1.1f%%')
-    plt.title(title)
+    out_of_class = "out_of_class"
+    valid_values = list(set(labels)) + [out_of_class]
+    valid_preds = []
+    for pred in preds:
+        if pred not in valid_values:
+            valid_preds.append(out_of_class)
+        else:
+            valid_preds.append(pred)
+
+    counter = Counter(valid_preds)
+    pred_labels = list(counter.keys())
+    pred_values = list(counter.values())
+
+    # 绘制柱状图 pred
+    plt.figure(figsize=(12, 12))
+    plt.subplot(2, 2, 1)
+    plt.bar(pred_labels, pred_values)
+    plt.xlabel("class")
+    plt.ylabel("count")
+    plt.title("pred class distribution")
+
+    # 绘制饼图 pred
+    plt.subplot(2, 2, 2)
+    plt.pie(pred_values, labels=pred_labels, autopct="%1.1f%%")
+    plt.title("pred class distribution")
+
+    # 绘制柱状图 label
+    counter = Counter(labels)
+    label_labels = list(counter.keys())
+    label_values = list(counter.values())
+    plt.subplot(2, 2, 3)
+    plt.bar(label_labels, label_values)
+    plt.xlabel("class")
+    plt.ylabel("count")
+    plt.title("label class distribution")
+    # 绘制饼图 label
+    plt.subplot(2, 2, 4)
+    plt.pie(label_values, labels=label_labels, autopct="%1.1f%%")
+    plt.title("label class distribution")
+    plt.suptitle("Pred and Label Class Distribution")
+
+    plt.tight_layout()
     plt.show()
 
 
@@ -256,6 +298,7 @@ def print_classification_report(predictions: List[str], labels: List[str]):
     print("=== 分类报告 ===")
     print(report["class_report"])
     print()
+    return report
 
 
 if __name__ == "__main__":
