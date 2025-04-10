@@ -266,6 +266,20 @@ def generate_classification_report(predictions: List[str], labels: List[str]) ->
     return report
 
 
+def convert_to_jsonable_report(report_row):
+    new_report_json = {}
+    for key, value in report_row.items():
+        if isinstance(value, dict):
+            new_report_json[key] = convert_to_jsonable_report(value)
+        elif isinstance(value, list):
+            new_report_json[key] = [convert_to_jsonable_report(item) if isinstance(item, dict) else item for item in value]
+        elif isinstance(value, pd.DataFrame):
+            new_report_json[key] = value.fillna(-1).to_dict(orient="records")
+        else:
+            new_report_json[key] = value
+    return new_report_json
+
+
 def print_classification_report(predictions: List[str], labels: List[str]):
     report = generate_classification_report(predictions, labels)
     """
