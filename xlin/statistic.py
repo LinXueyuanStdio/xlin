@@ -203,7 +203,7 @@ def generate_classification_report(predictions: List[str], labels: List[str]) ->
             pred_label = error_label
         confusion[(true_label, pred_label)] += 1
 
-    confusion_matrix = pd.DataFrame(index=extend_classes, columns=extend_classes, data=0)
+    confusion_matrix = pd.DataFrame(index=classes, columns=extend_classes, data=0)
     for (true, pred), count in confusion.items():
         confusion_matrix.loc[true, pred] = count
 
@@ -212,13 +212,15 @@ def generate_classification_report(predictions: List[str], labels: List[str]) ->
     micro_fp = 0
     micro_fn = 0
     class_stats = []
-    for cls in extend_classes:
+    for cls in classes:
         tp = confusion[(cls, cls)]
         fp = sum(confusion[(other, cls)] for other in extend_classes if other != cls)
         fn = sum(confusion[(cls, other)] for other in extend_classes if other != cls)
-        micro_tp += tp
-        micro_fp += fp
-        micro_fn += fn
+
+        if cls != error_label:
+            micro_tp += tp
+            micro_fp += fp
+            micro_fn += fn
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0
@@ -237,8 +239,10 @@ def generate_classification_report(predictions: List[str], labels: List[str]) ->
     # 添加汇总统计
     class_df = pd.DataFrame(class_stats)
     report["class_report"] = class_df
+    print(class_df)
+    print(confusion_matrix)
     confusion_matrix["recall"] = class_df["recall"].values.tolist()
-    p = class_df["precision"].values.tolist() + [None]
+    p = class_df["precision"].values.tolist() + ["", ""]  # [out_of_class, recall]
     tail = pd.DataFrame([p], index=["precision"], columns=confusion_matrix.columns)
     confusion_matrix = pd.concat([confusion_matrix, tail], axis=0)
     confusion_matrix.index.name = "True \\ Pred"
@@ -274,7 +278,10 @@ def convert_to_jsonable_report(report_row):
         elif isinstance(value, list):
             new_report_json[key] = [convert_to_jsonable_report(item) if isinstance(item, dict) else item for item in value]
         elif isinstance(value, pd.DataFrame):
-            new_report_json[key] = value.fillna(-1).to_dict(orient="records")
+            if value.index.name is not None:
+                value = value.reset_index()
+            value = value.fillna(-1)
+            new_report_json[key] = value.to_dict(orient="records")
         else:
             new_report_json[key] = value
     return new_report_json
