@@ -239,8 +239,6 @@ def generate_classification_report(predictions: List[str], labels: List[str]) ->
     # 添加汇总统计
     class_df = pd.DataFrame(class_stats)
     report["class_report"] = class_df
-    print(class_df)
-    print(confusion_matrix)
     confusion_matrix["recall"] = class_df["recall"].values.tolist()
     p = class_df["precision"].values.tolist() + ["", ""]  # [out_of_class, recall]
     tail = pd.DataFrame([p], index=["precision"], columns=confusion_matrix.columns)
