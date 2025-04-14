@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from collections import defaultdict
 
 import pandas as pd
@@ -47,7 +47,7 @@ def statistic_token_length(df: pd.DataFrame, model_path: str, row_to_prompt: lam
     return lengths
 
 
-def draw_histogram(data: list[int], bins=30, title="Data Distribution Analysis"):
+def draw_histogram(data: list[int], bins=30, title="Data Distribution Analysis", fig_save_path: Optional[str]=None):
     import numpy as np
     import matplotlib.pyplot as plt
     from scipy.stats import gaussian_kde
@@ -109,10 +109,11 @@ Kurtosis: {float((data - mean).mean()**4 / std**4):.4f}\
     # 显示图形
     plt.tight_layout()
     plt.show()
+    if fig_save_path is not None:
+        plt.savefig(fig_save_path, dpi=300)
 
 
-
-def draw_preds_labels(preds: list[str], labels: list[str]):
+def draw_preds_labels(preds: list[str], labels: list[str], title="Pred and Label Class Distribution", fig_save_path: Optional[str]=None):
     from collections import Counter
     import matplotlib.pyplot as plt
 
@@ -155,10 +156,12 @@ def draw_preds_labels(preds: list[str], labels: list[str]):
     plt.subplot(2, 2, 4)
     plt.pie(label_values, labels=label_labels, autopct="%1.1f%%")
     plt.title("label class distribution")
-    plt.suptitle("Pred and Label Class Distribution")
+    plt.suptitle(title)
 
     plt.tight_layout()
     plt.show()
+    if fig_save_path is not None:
+        plt.savefig(fig_save_path, dpi=300)
 
 
 def generate_classification_report(predictions: List[str], labels: List[str]) -> dict:
