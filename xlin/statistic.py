@@ -108,9 +108,9 @@ Kurtosis: {float((data - mean).mean()**4 / std**4):.4f}\
 
     # 显示图形
     plt.tight_layout()
-    plt.show()
     if fig_save_path is not None:
         plt.savefig(fig_save_path, dpi=300)
+    plt.show()
 
 
 def draw_preds_labels(preds: list[str], labels: list[str], title="Pred and Label Class Distribution", fig_save_path: Optional[str]=None):
@@ -159,9 +159,9 @@ def draw_preds_labels(preds: list[str], labels: list[str], title="Pred and Label
     plt.suptitle(title)
 
     plt.tight_layout()
-    plt.show()
     if fig_save_path is not None:
         plt.savefig(fig_save_path, dpi=300)
+    plt.show()
 
 
 def generate_classification_report(predictions: List[str], labels: List[str]) -> dict:
@@ -329,3 +329,8 @@ if __name__ == "__main__":
     truth = ["cat", "cat", "dog", "dog", "dog", "dog"]
 
     print_classification_report(preds, truth)
+
+    import random
+
+    lengths = [random.randint(0, 100) for _ in range(100)]
+    draw_histogram(lengths, bins=50, title="Length Distribution", fig_save_path="length_distribution.png")
