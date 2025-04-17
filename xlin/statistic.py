@@ -1,3 +1,4 @@
+import sys
 from typing import List, Optional
 from collections import defaultdict
 
@@ -112,8 +113,115 @@ Kurtosis: {float((data - mean).mean()**4 / std**4):.4f}\
         plt.savefig(fig_save_path, dpi=300)
     plt.show()
 
+def draw_radar(categories: list[str],
+               data: dict[str, list[float]],
+               ranges=(0, 5),
+               title: str = "Radar Chart",
+               size: tuple[float, float] = (6, 6),
+               colors: list[str] = None,
+               annotation_offset: float = 0.03,
+               annotation_kwargs: dict = None,
+               chinese_font: bool = False,
+               font_name: str = 'Heiti TC',
+               font_path: str = None,
+               fig_save_path: str = None):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.font_manager import FontProperties
+    """
+    Draw a radar chart with optional Chinese font support and configurable annotations.
 
-def draw_preds_labels(preds: list[str], labels: list[str], title="Pred and Label Class Distribution", fig_save_path: Optional[str]=None):
+    Parameters:
+    - categories: list of dimension names.
+    - data: dict mapping series name -> list of values (same length as categories).
+    - ranges: tuple (min, max) for radial axis.
+    - title: chart title.
+    - size: figure size tuple.
+    - colors: list of color hex strings.
+    - annotation_offset: fraction of (max-min) to offset text.
+    - annotation_kwargs: additional kwargs for plt.text (font size, bbox, etc).
+    - chinese_font: whether to enable Chinese font support.
+    - font_name: name of a system font to use (overrides defaults).
+    - font_path: path to a .ttf font file (used if provided).
+    - fig_save_path: if set, saves figure to this path (PNG at 300dpi).
+    """
+    # Validate data
+    N = len(categories)
+    for label, values in data.items():
+        if len(values) != N:
+            raise ValueError(f"Values for '{label}' must have length {N}")
+
+    # Font configuration
+    if font_path:
+        prop = FontProperties(fname=font_path)
+        plt.rcParams['font.family'] = prop.get_name()
+    elif font_name:
+        plt.rcParams['font.family'] = font_name
+    elif chinese_font:
+        if sys.platform == "darwin":
+            plt.rcParams['font.family'] = ['Heiti TC', 'Arial Unicode MS']
+        elif sys.platform.startswith("win"):
+            plt.rcParams['font.family'] = ['SimHei', 'Microsoft YaHei']
+        else:
+            # Fallback to Arial Unicode
+            plt.rcParams['font.family'] = ['Arial Unicode MS']
+    else:
+        plt.rcParams['font.family'] = ['Arial']
+
+    plt.rcParams['axes.unicode_minus'] = False
+
+    # Prepare angles
+    angles = np.linspace(0, 2 * np.pi, N, endpoint=False).tolist()
+    angles += angles[:1]
+
+    # Colors
+    default_colors = ["#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3", "#a6d854", "#ffd92f"]
+    colors = colors or default_colors
+
+    max_value = max(max(values) for values in data.values())
+    min_value = min(min(values) for values in data.values())
+    if ranges[0] > min_value or ranges[1] < max_value:
+        ranges = (min_value, max_value + 1)
+
+    # Create plot
+    fig, ax = plt.subplots(figsize=size, subplot_kw=dict(polar=True))
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(categories, fontsize=12)
+    ax.set_ylim(ranges)
+    ax.set_rlabel_position(180 / N)
+    ax.grid(color='gray', linestyle='--', linewidth=0.5)
+
+    # Plot each series
+    for idx, (label, values) in enumerate(data.items()):
+        vals = values + values[:1]
+        color = colors[idx % len(colors)]
+        ax.plot(angles, vals, color=color, linewidth=2, label=label)
+        ax.fill(angles, vals, color=color, alpha=0.25)
+
+        # Annotate points
+        for angle, val in zip(angles, vals):
+            offset = (ranges[1] - ranges[0]) * annotation_offset
+            ha = 'left' if np.cos(angle) >= 0 else 'right'
+            va = 'bottom' if np.sin(angle) >= 0 else 'top'
+            txt_kwargs = dict(fontsize=10, ha=ha, va=va, bbox=dict(boxstyle="round,pad=0.3", edgecolor=color, facecolor='white', alpha=0.8))
+            if annotation_kwargs:
+                txt_kwargs.update(annotation_kwargs)
+            ax.text(angle, val + offset, f"{val}", **txt_kwargs)
+
+    ax.set_title(title, va='bottom', fontsize=16)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.15, 1.05))
+    plt.tight_layout()
+
+    if fig_save_path:
+        plt.savefig(fig_save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+
+
+def draw_preds_labels(preds: list[str], labels: list[str],
+                      title="Pred and Label Class Distribution",
+                      fig_save_path: Optional[str]=None):
     from collections import Counter
     import matplotlib.pyplot as plt
 
@@ -329,8 +437,16 @@ if __name__ == "__main__":
     truth = ["cat", "cat", "dog", "dog", "dog", "dog"]
 
     print_classification_report(preds, truth)
+    draw_preds_labels(preds, truth, title="Pred and Label Class Distribution", fig_save_path="assets/pred_label_distribution.png")
 
     import random
 
     lengths = [random.randint(0, 100) for _ in range(100)]
-    draw_histogram(lengths, bins=50, title="Length Distribution", fig_save_path="length_distribution.png")
+    draw_histogram(lengths, bins=50, title="Length Distribution", fig_save_path="assets/length_distribution.png")
+
+    categories = ['速度', '可靠性', '舒适度', '安全性', '效率', '风格', '性价比']
+    data = {
+        '产品 A': [4, 3, 2, 5, 4, 3, -1],
+        '产品 B': [3, 4, 5, 3, 3, 4, 8]
+    }
+    draw_radar(categories, data, title="产品对比雷达图", chinese_font=True, fig_save_path="assets/radar_chart.png")
