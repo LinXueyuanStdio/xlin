@@ -4,6 +4,10 @@ from typing import *
 from pathlib import Path
 from loguru import logger
 import pandas as pd
+import pyexcel
+
+from xlin.util import ls
+from xlin.xls2xlsx import is_xslx
 
 
 def dataframe_to_json_list(df: pd.DataFrame):
@@ -68,9 +72,89 @@ def load_text(filename):
 
 
 def load_json_or_jsonl(filepath: str):
+    """
+    read_as_json_list 更好用，可以无缝切换到：read_as_json_list(filepath)
+    """
     if is_jsonl(filepath):
         return load_json_list(filepath)
     return load_json(filepath)
+
+
+def read_as_json_list(
+    filepath: Union[str, Path, List[str], List[Path]],
+    sheet_name: Optional[str] = None,
+    skip_None: bool = True,
+    skip_blank: bool = True,
+    filter: Callable[[Path], bool] = lambda x: True,
+) -> List[Dict]:
+    """
+    读取文件或递归读取文件夹里的文件为 JSON list（List[Dict]）。
+    支持格式：json, jsonl, xlsx, xls, csv, parquet, feather, pkl, h5, txt, tsv, xml, html, db
+    """
+    if isinstance(filepath, list):
+        json_list = []
+        for path in filepath:
+            try:
+                sub_list = read_as_json_list(path, sheet_name, skip_None, skip_blank, filter)
+                for obj in sub_list:
+                    if isinstance(obj, dict):
+                        obj["数据来源"] = Path(path).name
+                json_list.extend(sub_list)
+            except Exception as e:
+                print(f"读取失败 {path}: {e}")
+        return json_list
+
+    filepath = Path(filepath)
+    if filepath.is_dir():
+        paths = ls(filepath, filter=filter, expand_all_subdir=True)
+        return read_as_json_list(paths, sheet_name, skip_None, skip_blank, filter)
+
+    filename = filepath.name
+    if filename.endswith(".json") or filename.endswith(".jsonl"):
+        if is_jsonl(filepath):
+            return load_json_list(filepath)
+        else:
+            return [load_json(filepath)]
+
+    elif filename.endswith(".xlsx"):
+        if sheet_name is None:
+            df = pd.read_excel(filepath)
+        else:
+            df = pd.read_excel(filepath, sheet_name)
+    elif filename.endswith(".xls"):
+        if is_xslx(filepath):
+            if sheet_name is None:
+                df = pd.read_excel(filepath)
+            else:
+                df = pd.read_excel(filepath, sheet_name)
+        else:
+            df = pyexcel.get_sheet(file_name=filepath)
+    elif filename.endswith(".csv"):
+        df = pd.read_csv(filepath)
+    elif filename.endswith(".parquet"):
+        df = pd.read_parquet(filepath)
+    elif filename.endswith(".feather"):
+        df = pd.read_feather(filepath)
+    elif filename.endswith(".pkl"):
+        df = pd.read_pickle(filepath)
+    elif filename.endswith(".h5"):
+        df = pd.read_hdf(filepath)
+    elif filename.endswith(".txt"):
+        df = pd.read_csv(filepath, delimiter="\t")
+    elif filename.endswith(".tsv"):
+        df = pd.read_csv(filepath, delimiter="\t")
+    elif filename.endswith(".xml"):
+        df = pd.read_xml(filepath)
+    elif filename.endswith(".html"):
+        df = pd.read_html(filepath)[0]
+    elif filename.endswith(".db"):
+        if sheet_name is None:
+            raise ValueError("读取 .db 文件需要提供 sheet_name 作为表名")
+        df = pd.read_sql_table(sheet_name, f"sqlite:///{filepath}")
+    else:
+        raise ValueError(f"Unsupported file type: {filepath}")
+
+    return df.to_dict(orient="records")
 
 
 def load_json(filename: str):
@@ -84,16 +168,24 @@ def save_json(json_list: Union[Dict[str, str], List[Dict[str, str]]], filename: 
         return json.dump(json_list, f, ensure_ascii=False, separators=(",", ":"), indent=2)
 
 
-def load_json_list(filename: str):
+def load_json_list(filename: str, skip_None=True, skip_blank=True) -> List[Dict[str, str]]:
     with open(filename, "r", encoding="utf-8") as f:
         lines = f.readlines()
         json_list = []
-        for i in lines:
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if line == "":
+                if not skip_blank:
+                    json_list.append("")
+                continue
+            if line == "None":
+                if not skip_None:
+                    json_list.append(None)
+                continue
             try:
-                obj = json.loads(i.strip())
+                obj = json.loads(line)
             except:
-                print("格式损坏数据，无法加载")
-                print(i)
+                print(f"格式损坏，跳过第 {i} 行: {repr(line)}")
                 continue
             json_list.append(obj)
         return json_list
@@ -176,7 +268,7 @@ def apply_changes_to_paths(
 ):
     total_updated = 0
     total_deleted = 0
-    for path in paths:
+    for path in ls(paths):
         if verbose:
             print("checking", path)
         jsonlist = load_json(path)
@@ -199,25 +291,8 @@ def apply_changes_to_paths(
     print(f"total: updated {total_updated}, deleted {total_deleted}")
 
 
-def backup_current_output(row: Dict[str, str], output_key="output"):
-    if "old_output" in row:
-        for i in range(1, 10):
-            if f"old_output{i}" not in row:
-                row[f"old_output{i}"] = row[output_key]
-                break
-    else:
-        row["old_output"] = row[output_key]
-    return row
-
-
-def backup_and_set_output(row: Dict[str, str], output: str):
-    backup_current_output(row)
-    row["output"] = output
-    return row
-
-
 def generator_from_paths(paths: List[Path], load_data: Callable[[Path], List[Dict[str, Any]]] = load_json):
-    for path in paths:
+    for path in ls(paths):
         jsonlist: List[Dict[str, Any]] = load_data(path)
         for row in jsonlist:
             yield path, row
