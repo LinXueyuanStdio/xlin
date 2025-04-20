@@ -100,6 +100,16 @@ def xmap(
         preserve_order (bool): 是否保持结果顺序
         chunksize (Optional[int]): 单个任务分块大小，None为自动计算
         retry_count (int): 任务失败重试次数
+
+    Example:
+        >>> from xlin.multiprocess_mapping import xmap
+        >>> jsonlist = [{"id": 1, "text": "Hello"}, {"id": 2, "text": "World"}]
+        >>> def work_func(item):
+        ...     item["text"] = item["text"].upper()
+        ...     return item
+        >>> results = xmap(jsonlist, work_func, output_path="output.jsonl", batch_size=2)
+        >>> print(results)
+        [{'id': 1, 'text': 'HELLO'}, {'id': 2, 'text': 'WORLD'}]
     """
     need_caching = output_path is not None
     output_list = []
@@ -204,7 +214,7 @@ def xmap(
 def multiprocessing_mapping(
     df: pd.DataFrame,
     output_path: Optional[Union[str, Path]],
-    partial_func,
+    partial_func: Callable[[Dict[str, str]], Dict[str, str]],
     batch_size=multiprocessing.cpu_count(),
     cache_batch_num=1,
     thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
@@ -215,6 +225,9 @@ def multiprocessing_mapping(
         df (DataFrame): [description]
         output_path (Path): 数据量大的时候需要缓存
         partial_func (function): (Dict[str, str]) -> Dict[str, str]
+        batch_size (int): batch size
+        cache_batch_num (int): cache batch num
+        thread_pool_size (int): thread pool size
     """
     need_caching = output_path is not None
     tmp_list, output_list = list(), list()
