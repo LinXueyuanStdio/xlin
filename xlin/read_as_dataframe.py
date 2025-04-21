@@ -77,7 +77,9 @@ def read_as_dataframe(
     elif filename.endswith(".html"):
         df = pd.read_html(filepath)[0]
     elif filename.endswith(".db"):
-        df = pd.read_sql_table(sheet_name, filepath)
+        if sheet_name is None:
+            raise ValueError("读取 .db 文件需要提供 sheet_name 作为表名")
+        df = pd.read_sql_table(sheet_name, f"sqlite:///{filepath}")
     else:
         raise ValueError(
             (
