@@ -36,9 +36,19 @@ rm(dir_path)
 cp(dir_path, "./backup_data")  # 会根据最大公共前缀保持文件夹结构
 ```
 
-### 读取类：`read_as_json_list`，`read_as_dataframe`，`read_as_dataframe_dict`，`load_text`，`load_yaml`，`load_json`，`load_json_list`
+### 读取类
 
-读取文件为表格。如果是文件夹，则读取文件夹下的所有文件为表格并拼接。
+- `read_as_json_list`：读取 JSON 文件为列表。
+- `read_as_dataframe`：读取文件为表格。如果是文件夹，则读取文件夹下的所有文件为表格并拼接。
+- `read_as_dataframe_dict`：读取文件为字典，键为表头，值为列数据。
+- `load_text`：加载文本文件。
+- `load_yaml`：加载 YAML 文件。
+- `load_json`：加载 JSON 文件。
+- `load_json_list`：加载 JSON 列表文件。
+
+
+> `read_as_**` 函数支持文件夹或者文件，支持多种文件格式，包括 Excel、CSV、JSON、Parquet 等。
+> `load_**` 函数主要用于加载单个文件，支持文本、YAML 和 JSON 格式。
 
 ```python
 from xlin import *
@@ -61,15 +71,13 @@ json_data = load_json("example.json")
 json_list_data = load_json_list("example.jsonl")
 ```
 
-### 保存类：`save_json`，`save_json_list`，`save_df`，`save_df_dict`，`save_df_from_jsonlist`, `append_to_json_list`
-
-- `save_df_dict`: 将 `read_as_dataframe_dict` 返回的字典保存为 Excel 文件。
+### 保存类
 
 ```python
 save_json(data, 'output.json')
 save_json_list(jsonlist, 'output.jsonl')
 save_df(df, 'output.xlsx')
-save_df_dict(df_dict, 'output.xlsx')
+save_df_dict(df_dict, 'output.xlsx')  # 将 read_as_dataframe_dict 返回的字典保存为 Excel 文件。
 save_df_from_jsonlist(jsonlist, 'output_from_jsonlist.xlsx')
 append_to_json_list(data, 'output.jsonl')
 ```
@@ -114,8 +122,8 @@ for sheet_name, df in merged_df_dict.items():
     print(df)
 ```
 
-### 对 json 文件批量操作：`apply_changes_to_paths`，`apply_changes_to_jsonlist`
-对 JSON 列表应用更改。
+### 对 json 文件批量操作
+- 对 JSON 列表应用更改：`apply_changes_to_paths`，`apply_changes_to_jsonlist`
 
 ```python
 from xlin import *
@@ -138,8 +146,8 @@ new_jsonlist, updated, deleted = apply_changes_to_jsonlist(jsonlist, changes)
 print(new_jsonlist)
 ```
 
-### 生成器：`generator_from_paths`
-从多个文件中生成 JSON 列表的生成器。
+### 生成器
+- 从多个文件中生成 JSON 列表的生成器：`generator_from_paths`
 
 ```python
 from xlin import generator_from_paths
@@ -151,8 +159,8 @@ for path, row in generator_from_paths(paths):
     print(f"Path: {path}, Row: {row}")
 ```
 
-### 数据转换：`dataframe_to_json_list` 和 `jsonlist_to_dataframe`
-DataFrame 和 JSON 列表之间的转换。
+### 数据转换
+- DataFrame 和 JSON 列表之间的转换：`dataframe_to_json_list` 和 `jsonlist_to_dataframe`
 
 ```python
 from xlin import dataframe_to_json_list, jsonlist_to_dataframe
@@ -168,8 +176,8 @@ new_df = jsonlist_to_dataframe(json_list)
 print(new_df)
 ```
 
-### 分组：`grouped_col_list`、`grouped_col` 和 `grouped_row`，`grouped_row_in_jsonlist`
-对 DataFrame 进行分组。
+### 分组
+- 对 DataFrame 进行分组：`grouped_col_list`、`grouped_col` 和 `grouped_row`
 
 ```python
 from xlin import grouped_col_list, grouped_col, grouped_row
@@ -188,7 +196,7 @@ grouped_row_result = grouped_row(df)
 print(grouped_row_result)
 ```
 
-对 JSON 列表进行分组。
+- 对 JSON 列表进行分组：`grouped_row_in_jsonlist`
 
 ```python
 from xlin import grouped_row_in_jsonlist
