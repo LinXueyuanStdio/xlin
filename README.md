@@ -14,8 +14,6 @@ pip install xlin --upgrade
 from xlin import *
 ```
 
-## Examples
-
 ### 文件操作类：`ls`，`rm` 和 `cp`
 - `ls`: 列出文件或文件夹下的所有文件。
 - `rm`: 删除文件或文件夹。
