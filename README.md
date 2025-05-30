@@ -46,6 +46,7 @@ cp(dir_path, "./backup_data")  # 会根据最大公共前缀保持文件夹结�
 
 
 > `read_as_**` 函数支持文件夹或者文件，支持多种文件格式，包括 Excel、CSV、JSON、Parquet 等。
+>
 > `load_**` 函数主要用于加载单个文件，支持文本、YAML 和 JSON 格式。
 
 ```python
