@@ -1,9 +1,25 @@
 import sys
 from typing import List, Optional
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import pandas as pd
 
+
+def sortedCounter(obj, by="key", reverse=False, return_list=False):
+    c = Counter(obj)
+    c_list = [(k, c[k]) for k in c]
+    if by == "key":
+        c_list = sorted(c_list, key=lambda x: x[0], reverse=reverse)
+    elif by in ["value", "count"]:
+        c_list = sorted(c_list, key=lambda x: x[1], reverse=reverse)
+    else:
+        raise Exception(f"unsupported by: {by}")
+    c = Counter()
+    for k, v in c_list:
+        c[k] = v
+    if return_list:
+        return c, c_list
+    return c
 
 
 def bucket_count(length: List[int], step=50, skip_zero_count=False):
