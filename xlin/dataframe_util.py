@@ -306,3 +306,55 @@ def grouped_row(df: pd.DataFrame, key_col="query"):
     for i, row in df.iterrows():
         grouped[row[key_col]].append(row)
     return grouped
+
+def select_sub_df(
+    df: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+    lookback_window: int = 0,
+    lookforward_window: int = 0,
+    include_end_date: bool = False,
+) -> pd.DataFrame:
+    """
+    从DataFrame中选择指定日期范围内的子DataFrame。
+
+    Args:
+        df (pd.DataFrame): 带有日期索引的DataFrame，index是日期。
+        start_date (str): 起始日期，格式'YYYY-MM-DD'。
+        end_date (str): 结束日期，格式'YYYY-MM-DD'。
+        lookback_window (int): 向后查看的天数，默认为0。
+        lookforward_window (int): 向前查看的天数，默认为0。
+        include_end_date (bool): 是否包含结束日期，默认为False。
+
+    Returns:
+        pd.DataFrame: 指定日期范围内的子DataFrame。
+    """
+    # 确保索引是DatetimeIndex类型
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index)
+
+    # 确保索引是有序的
+    if not df.index.is_monotonic_increasing:
+        df = df.sort_index()
+
+    # 获取索引的时区信息
+    tz = df.index.tz
+
+    # 创建带时区的切片日期
+    start = pd.Timestamp(start_date, tz=tz)
+    end = pd.Timestamp(end_date, tz=tz)
+
+    # 选择子DataFrame
+    try:
+        if lookback_window > 0:
+            start = start - pd.Timedelta(days=lookback_window)
+        if lookforward_window > 0:
+            end = end + pd.Timedelta(days=lookforward_window)
+        if include_end_date:
+            end = end + pd.Timedelta(days=1)
+        sub_df = df[start:end]
+    except KeyError:
+        print(f"日期 {start_date} 或 {end_date} 不在索引范围内。")
+        sub_df = pd.DataFrame()
+
+    return sub_df
