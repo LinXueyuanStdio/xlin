@@ -1,11 +1,8 @@
 from typing import *
-from collections import defaultdict
 from pathlib import Path
 import os
-import asyncio
 import shutil
 
-import pandas as pd
 from loguru import logger
 
 def auto_retry_to_get_data(retry_times, request, data_key="data", *args, **kwargs):
