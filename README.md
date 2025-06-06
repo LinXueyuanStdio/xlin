@@ -82,19 +82,102 @@ append_to_json_list(data, 'output.jsonl')
 ```
 
 ### 并行处理类：`xmap`
-高效处理 JSON 列表，支持多进程/多线程。
+高效处理 JSON 列表
+1. 支持多进程/多线程。
+2. 支持批量处理。批次内可以不被最慢的样本卡住。
+3. 支持异步处理。
+4. 支持实时缓存。
+5. 支持保序输出。
+
+|方法名称|耗时(秒)|加速比|
+|----|----|----|
+|普通for循环|150.5713|-|
+|xmap(非批量)|38.2211|3.94x|
+|xmap(批量)|41.3710|3.64x|
+|异步xmap(非批量)|39.8200|3.78x|
+|异步xmap(批量)|12.3701|12.17x|
 
 ```python
-from xlin import xmap
+from xlin import xmap, xmap_async
 
-jsonlist = [{"id": 1, "text": "Hello"}, {"id": 2, "text": "World"}]
+jsonlist = [{"id": i, "value": "Hello World"} for i in range(100)]
 
-def work_func(item):
-    item["text"] = item["text"].upper()
+def fast_work_func(item):
+    item["value"] = item["value"].upper()
     return item
 
-results = xmap(jsonlist, work_func, output_path="output.jsonl", batch_size=2)
-print(results)
+def slow_work_func(item):
+    item = fast_work_func(item)
+    process_time = random.uniform(1, 2)
+    time.sleep(process_time)  # 模拟处理延迟
+    return item
+
+def batch_work_func(items):
+    return [slow_work_func(item) for item in items]
+
+async def async_work_func(item):
+    item = fast_work_func(item)
+    await asyncio.sleep(random.uniform(1, 2))
+    return item
+
+async def async_batch_work_func(items):
+    return await asyncio.gather(*(async_work_func(item) for item in items))
+
+# 在一般的函数中使用
+results = xmap(jsonlist, slow_work_func)
+results = xmap(jsonlist, batch_work_func, is_batch_work_func=True)
+results = xmap(jsonlist, async_work_func, is_async_work_func=True)
+results = xmap(jsonlist, async_batch_work_func, is_async_work_func=True, is_batch_work_func=True)
+
+# 在 async 函数中使用
+results = await xmap_async(jsonlist, slow_work_func)
+results = await xmap_async(jsonlist, batch_work_func, is_batch_work_func=True)
+results = await xmap_async(jsonlist, async_work_func, is_async_work_func=True)
+results = await xmap_async(jsonlist, async_batch_work_func, is_async_work_func=True, is_batch_work_func=True)
+```
+
+网络请求示例：
+```python
+from xlin import xmap
+import aiohttp
+
+async def fetch_url(item: dict):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(item['url']) as response:
+            return {'url': item['url'], 'data': await response.json()}
+
+urls_data = [
+    {"url": "https://www.example.com"},
+    {"url": "https://www.example.org"},
+    {"url": "https://www.example.net"},
+]
+result = xmap(urls_data, fetch_url, is_async_work_func=True)
+```
+
+函数参数说明
+```python
+Args:
+    jsonlist (list[Any]): 要处理的JSON对象列表
+    work_func (Callable): 处理函数，可以是同步或异步的
+        - 同步单个处理函数 (item) -> Dict
+        - 同步批量处理函数 (List[item]) -> List[Dict]
+        - 异步单个处理函数 async (item) -> Dict
+        - 异步批量处理函数 async (List[item]) -> List[Dict]
+        使用批量处理函数时，`is_batch_work_func` 参数必须设置为 `True`。内部会自动按 `batch_size` 切分数据。
+    output_path (Optional[Union[str, Path]]): 输出路径，None表示不缓存
+    desc (str): 进度条描述
+    max_workers (int): 最大工作线程数，默认为8
+    use_process_pool (bool): 是否使用进程池，默认为True
+    preserve_order (bool): 是否保持结果顺序，默认为True
+    retry_count (int): 失败重试次数，默认为0
+    force_overwrite (bool): 是否强制覆盖输出文件，默认为False
+    is_batch_work_func (bool): 是否批量处理函数，默认为False
+    batch_size (int): 批量处理大小，默认为32. 仅当`is_batch_work_func`为True时有效
+    is_async_work_func (bool): 是否异步函数，默认为False
+    verbose (bool): 是否打印详细信息，默认为False
+
+Returns:
+    list[Any]: 处理后的结果列表，包含原始数据和处理结果
 ```
 
 ### 合并多个文件：`merge_json_list`，`merge_multiple_df_dict`
