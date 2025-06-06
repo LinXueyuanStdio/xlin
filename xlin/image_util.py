@@ -6,6 +6,17 @@ from PIL import Image, ImageDraw, ImageFont
 import uuid
 import os
 
+import requests
+
+
+def read_image_http_url(image_url: str) -> Image.Image:
+    # 使用 requests 获取图像的二进制数据
+    response = requests.get(image_url)
+    image_data = response.content
+
+    # 使用 Pillow 将二进制数据转换为 Image.Image 对象
+    image = Image.open(BytesIO(image_data))
+    return image
 
 def image_to_base64(image: Image.Image) -> str:
     buffered = BytesIO()
