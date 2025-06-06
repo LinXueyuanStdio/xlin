@@ -1,5 +1,5 @@
 
-def stream_average(avg_pre, cur_num_index, cur_num):
+def stream_average(avg_pre: float, cur_num_index: int, cur_num: float) -> float:
     """
     calculate the average of number in a stream
     given nums: List[float], calculate avg[n] = sum(nums[:n]) / len(nums[:n]) = sum(nums[:n]) / n
