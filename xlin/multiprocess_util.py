@@ -1,3 +1,4 @@
+import asyncio
 import time
 import os
 import multiprocessing
@@ -8,6 +9,9 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 from loguru import logger
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Executor
+from tqdm.asyncio import tqdm as asyncio_tqdm
+import heapq
 
 from xlin.jsonlist_util import append_to_json_list, dataframe_to_json_list, load_json_list, row_to_json, save_json_list, load_json, save_json
 from xlin.dataframe_util import read_as_dataframe
@@ -72,52 +76,91 @@ def dataframe_with_row_mapping(
     return df
 
 
-def xmap(
+async def xmap_async(
     jsonlist: list[Any],
-    work_func: Union[Callable[[Any], dict], Callable[[list[Any]], list[dict]]],
-    output_path: Optional[Union[str, Path]]=None,  # 输出路径，None表示不缓存
-    batch_size=multiprocessing.cpu_count(),
-    cache_batch_num=1,
-    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 8)),
+    work_func: Union[
+      Callable[[Any], dict],
+      Callable[[list[Any]], list[dict]],
+      Awaitable[Callable[[Any], dict]],
+      Awaitable[Callable[[list[Any]], list[dict]]],
+    ],
+    output_path: Optional[Union[str, Path]] = None,
+    *,
+    desc: str = "Processing",
+    max_workers=8,  # 最大工作线程数
     use_process_pool=True,  # CPU密集型任务时设为True
     preserve_order=True,  # 是否保持结果顺序
-    chunksize=None,  # 自动计算最佳分块大小
     retry_count=0,  # 失败重试次数
     force_overwrite=False,  # 是否强制覆盖输出文件
     is_batch_work_func=False,  # 是否批量处理函数
+    batch_size=32,  # 批量处理大小
+    is_async_work_func=False,  # 是否异步函数
     verbose=False,  # 是否打印详细信息
 ):
-    """高效处理JSON列表，支持多进程/多线程
+    """xmap_async 是 xmap 的异步版本，使用 async/await 实现高性能并发处理。
+    特别适用于 I/O 密集型任务，如网络请求、文件操作等。支持处理过程中的实时缓存。
 
     Args:
         jsonlist (list[Any]): 要处理的JSON对象列表
+        work_func (Callable): 处理函数，可以是同步或异步的
+            - 同步单个处理函数 (item) -> Dict
+            - 同步批量处理函数 (List[item]) -> List[Dict]
+            - 异步单个处理函数 async (item) -> Dict
+            - 异步批量处理函数 async (List[item]) -> List[Dict]
+            使用批量处理函数时，`is_batch_work_func` 参数必须设置为 `True`。内部会自动按 `batch_size` 切分数据。
         output_path (Optional[Union[str, Path]]): 输出路径，None表示不缓存
-        work_func (Callable): 处理函数，接收dict返回dict
-        batch_size (int): 批处理大小
-        cache_batch_num (int): 缓存批次数量
-        thread_pool_size (int): 线程/进程池大小
-        use_process_pool (bool): 是否使用进程池(CPU密集型任务)
-        preserve_order (bool): 是否保持结果顺序
-        chunksize (Optional[int]): 单个任务分块大小，None为自动计算
-        retry_count (int): 任务失败重试次数
+        desc (str): 进度条描述
+        max_workers (int): 最大工作线程数，默认为8
+        use_process_pool (bool): 是否使用进程池，默认为True
+        preserve_order (bool): 是否保持结果顺序，默认为True
+        retry_count (int): 失败重试次数，默认为0
+        force_overwrite (bool): 是否强制覆盖输出文件，默认为False
+        is_batch_work_func (bool): 是否批量处理函数，默认为False
+        batch_size (int): 批量处理大小，默认为32. 仅当`is_batch_work_func`为True时有效
+        is_async_work_func (bool): 是否异步函数，默认为False
+        verbose (bool): 是否打印详细信息，默认为False
 
-    Example:
-        >>> from xlin.multiprocess_mapping import xmap
-        >>> jsonlist = [{"id": 1, "text": "Hello"}, {"id": 2, "text": "World"}]
-        >>> def work_func(item):
-        ...     item["text"] = item["text"].upper()
-        ...     return item
-        >>> results = xmap(jsonlist, work_func, output_path="output.jsonl", batch_size=2)
-        >>> print(results)
-        [{'id': 1, 'text': 'HELLO'}, {'id': 2, 'text': 'WORLD'}]
+    Returns:
+        list[Any]: 处理后的结果列表，包含原始数据和处理结果
+
+    Examples:
+        1. 同步单个处理函数:
+            ```python
+            def process_item(item):
+                # 处理单个项目
+                return {"id": item["id"], "value": item["value"] * 2}
+
+            results = await xmap_async(jsonlist, process_item)
+            ```
+        2. 同步批量处理函数:
+            ```python
+            def process_batch(items):
+                # 处理批量项目
+                return [{"id": item["id"], "value": item["value"] * 2} for item in items]
+
+            results = await xmap_async(jsonlist, process_batch, is_batch_work_func=True)
+            ```
+        3. 异步单个处理函数:
+            ```python
+            async def async_process_item(item):
+            # 异步处理单个项目
+            await asyncio.sleep(0.1)  # 模拟异步操作
+            return {"id": item["id"], "value": item["value"] * 2}
+
+            results = await xmap_async(jsonlist, async_process_item, is_async_work_func=True)
+            ```
+        4. 异步批量处理函数:
+            ```python
+            async def async_process_batch(items):
+                # 异步处理批量项目
+                return await asyncio.gather(*[async_process_item(item) for item in items])  # 模拟异步操作
+
+            results = await xmap_async(jsonlist, async_process_batch, is_async_work_func=True, is_batch_work_func=True)
+            ```
     """
     need_caching = output_path is not None
     output_list = []
     start_idx = 0
-
-    # 自动计算最佳chunksize
-    if chunksize is None:
-        chunksize = max(1, min(batch_size // thread_pool_size, 100))
 
     # 处理缓存
     if need_caching:
@@ -135,80 +178,197 @@ def xmap(
         else:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 选择线程池或进程池
+    # 准备要处理的数据
+    remaining = jsonlist[start_idx:]
+    if is_batch_work_func:
+        remaining = [remaining[i:i + batch_size] for i in range(0, len(remaining), batch_size)]
+
+    loop = asyncio.get_event_loop()
     if use_process_pool:
-        pool_cls = multiprocessing.Pool
-        if verbose:
-            logger.info(f"使用进程池(ProcessPool)，适用于CPU密集型任务")
+        executor: Executor = ProcessPoolExecutor(max_workers=max_workers)
     else:
-        pool_cls = ThreadPool
-        if verbose:
-            logger.info(f"使用线程池(ThreadPool)，适用于IO密集型任务")
+        executor = ThreadPoolExecutor(max_workers=max_workers)
 
-    with pool_cls(thread_pool_size) as pool:
-        if verbose:
-            logger.info(f"池大小: {thread_pool_size}, 批处理大小: {batch_size}, 分块大小: {chunksize}")
+    async def submit_task(index: int, item: Any):
+        if is_async_work_func:
+            return index, await work_func(item)
+        return index, await loop.run_in_executor(executor, work_func, item)
 
-        # 准备要处理的数据
-        remaining_items = jsonlist[start_idx:]
-        total_items = len(remaining_items)
+    # 异步调度
+    results = []
+    pq = []
 
-        # 批量处理逻辑
-        def process_batch(items_batch, retry_remaining=retry_count):
-            try:
+    async def schedule_items():
+        sem = asyncio.Semaphore(max_workers)
+        pbar = asyncio_tqdm(total=len(remaining), desc=desc, unit="it")
+        result_queue = asyncio.Queue()
+
+        async def task_fn(index: int, item: Any | list[Any]):
+            async with sem:
+                # 实现重试逻辑
+                for retry_step_idx in range(retry_count + 1):
+                    try:
+                        result = await submit_task(index, item)
+                        await result_queue.put(result)
+                        break
+                    except Exception as e:
+                        if retry_step_idx < retry_count:
+                            if verbose:
+                                logger.error(f"处理失败，索引 {index} 重试中 ({retry_step_idx + 1}/{retry_count}): {e}")
+                        else:
+                            if verbose:
+                                logger.error(f"最终失败，无法处理索引 {index} 的项目: {e}")
+                            fallback_result = {"index": index, "error": str(e)}
+                            if is_batch_work_func:
+                                fallback_result = [fallback_result] * batch_size
+                            # 将错误结果放入队列
+                            await result_queue.put((index, fallback_result))
+
+
+        async def producer():
+            for i, item in enumerate(remaining):
+                index = i + start_idx
+                asyncio.create_task(task_fn(index, item))
+
+        asyncio.create_task(producer())
+
+        next_expect = start_idx
+
+        while len(results) + start_idx < len(jsonlist):
+            idx, res = await result_queue.get()
+
+            if preserve_order:
+                heapq.heappush(pq, (idx, res))
+                # 保序输出
+                output_buffer = []
+                while pq and pq[0][0] == next_expect:
+                    _, r = heapq.heappop(pq)
+                    if is_batch_work_func:
+                        output_buffer.extend(r)
+                        results.extend(r)
+                    else:
+                        output_buffer.append(r)
+                        results.append(r)
+                    next_expect += 1
+                    pbar.update(1)
+                if need_caching:
+                    append_to_json_list(output_buffer, output_path)
+            else:
+                # 非保序输出
                 if is_batch_work_func:
-                    # 批量处理函数
-                    return work_func(items_batch)
+                    results.extend(res)
+                    if need_caching:
+                        append_to_json_list(res, output_path)
                 else:
-                    # 选择合适的映射方法
-                    map_func = pool.imap_unordered if not preserve_order else pool.imap
-                    return list(map_func(work_func, items_batch, chunksize))
-            except Exception as e:
-                if retry_remaining > 0:
-                    if verbose:
-                        logger.warning(f"批处理失败，重试中 ({retry_count-retry_remaining+1}/{retry_count}): {e}")
-                    return process_batch(items_batch, retry_remaining - 1)
-                else:
-                    if verbose:
-                        logger.error(f"批处理失败: {e}")
-                    raise
+                    results.append(res)
+                    if need_caching:
+                        append_to_json_list([res], output_path)
+                pbar.update(1)
 
-        # 处理数据
-        with tqdm(total=total_items, desc="Map", unit="examples") as pbar:
-            # 跳过已处理的项目
-            pbar.update(start_idx)
+        pbar.close()
 
-            # 分批处理
-            for i in range(0, total_items, batch_size):
-                batch = remaining_items[i : i + batch_size]
+    await schedule_items()
+    return jsonlist[:start_idx] + results
 
-                # 处理当前批次
-                batch_start_time = time.time()
-                results = process_batch(batch)
-                batch_time = time.time() - batch_start_time
+def xmap(
+    jsonlist: list[Any],
+    work_func: Union[
+        Callable[[Any], dict],
+        Callable[[list[Any]], list[dict]],
+        Awaitable[Callable[[Any], dict]],
+        Awaitable[Callable[[list[Any]], list[dict]]],
+    ],
+    output_path: Optional[Union[str, Path]]=None,  # 输出路径，None表示不缓存
+    *,
+    desc: str = "Processing",
+    max_workers=8,  # 最大工作线程数
+    use_process_pool=True,  # CPU密集型任务时设为True
+    preserve_order=True,  # 是否保持结果顺序
+    retry_count=0,  # 失败重试次数
+    force_overwrite=False,  # 是否强制覆盖输出文件
+    is_batch_work_func=False,  # 是否批量处理函数
+    batch_size=8,  # 批量处理大小，仅当`is_batch_work_func`为True时有效
+    is_async_work_func=False,  # 是否异步处理函数
+    verbose=False,  # 是否打印详细信息
+):
+    """高效处理JSON列表，支持多进程/多线程
 
-                # 更新结果
-                output_list.extend(results)
-                pbar.update(len(batch))
+    Args:
+        jsonlist (List[Any]): 需要处理的JSON数据列表
+        work_func (Callable): 处理函数，可以是同步或异步的
+            - 同步单个处理函数 (item) -> Dict
+            - 同步批量处理函数 (List[item]) -> List[Dict]
+            - 异步单个处理函数 async (item) -> Dict
+            - 异步批量处理函数 async (List[item]) -> List[Dict]
+            使用批量处理函数时，`is_batch_work_func` 参数必须设置为 `True`。内部会自动按 `batch_size` 切分数据。
+        output_path (Optional[Union[str, Path]]): 输出路径，且同时是实时缓存路径。None表示不缓存，结果仅保留在内存中
+        desc (str): 进度条描述
+        max_workers (int): 最大工作线程数，默认为8
+        use_process_pool (bool): 是否使用进程池，默认为True
+        preserve_order (bool): 是否保持结果顺序，默认为True
+        retry_count (int): 失败重试次数，默认为0
+        force_overwrite (bool): 是否强制覆盖输出文件，默认为False
+        is_batch_work_func (bool): 是否批量处理函数，默认为False
+        batch_size (int): 批量处理大小，默认为32. 仅当`is_batch_work_func`为True时有效
+        is_async_work_func (bool): 是否异步函数，默认为False
+        verbose (bool): 是否打印详细信息，默认为False
 
-                # 性能统计
-                pbar.set_postfix_str(f"{batch_time:.1f} s/batch, {len(results)} examples")
+    Returns:
+        list[Any]: 处理后的结果列表，包含原始数据和处理结果
 
-                # 缓存逻辑
-                if need_caching and (i // batch_size) % cache_batch_num == 0:
-                    # 仅当处理速度足够慢时才保存缓存，避免IO成为瓶颈
-                    if batch_time > 3 or i + batch_size >= total_items:
-                        save_json_list(output_list, output_path)
-                        logger.debug(f"已保存 {len(output_list)} 条记录到 {output_path}")
+    Examples:
+        1. 同步单个处理函数:
+            ```python
+            def process_item(item):
+                # 处理单个项目
+                return {"id": item["id"], "value": item["value"] * 2}
 
-    # 最终保存
-    if need_caching:
-        save_json_list(output_list, output_path)
-    if verbose:
-        drop_count = len(jsonlist) - len(output_list)
-        logger.info(f"处理完成，共处理 {len(jsonlist)} 条记录" + f", 丢弃 {drop_count} 条记录" if drop_count > 0 else "")
+            results = xmap(jsonlist, process_item)
+            ```
+        2. 同步批量处理函数:
+            ```python
+            def process_batch(items):
+                # 处理批量项目
+                return [{"id": item["id"], "value": item["value"] * 2} for item in items]
 
-    return output_list
+            results = xmap(jsonlist, process_batch, is_batch_work_func=True)
+            ```
+        3. 异步单个处理函数:
+            ```python
+            async def async_process_item(item):
+            # 异步处理单个项目
+            await asyncio.sleep(0.1)  # 模拟异步操作
+            return {"id": item["id"], "value": item["value"] * 2}
+
+            results = xmap(jsonlist, async_process_item, is_async_work_func=True)
+            ```
+        4. 异步批量处理函数:
+            ```python
+            async def async_process_batch(items):
+                # 异步处理批量项目
+                return await asyncio.gather(*[async_process_item(item) for item in items])  # 模拟异步操作
+
+            results = xmap(jsonlist, async_process_batch, is_async_work_func=True, is_batch_work_func=True)
+            ```
+    """
+    return asyncio.run(
+        xmap_async(
+            jsonlist=jsonlist,
+            work_func=work_func,
+            output_path=output_path,
+            desc=desc,
+            max_workers=max_workers,
+            use_process_pool=use_process_pool,
+            preserve_order=preserve_order,
+            retry_count=retry_count,
+            force_overwrite=force_overwrite,
+            is_batch_work_func=is_batch_work_func,
+            batch_size=batch_size,
+            is_async_work_func=is_async_work_func,
+            verbose=verbose,
+        )
+    )
+
 
 
 def multiprocessing_mapping(
@@ -416,3 +576,12 @@ def dataframe_batch_mapping(
             pbar.set_postfix_str(f"Cache: {len(output_list)}/{len(df)}")
     output_df = pd.DataFrame(output_list)
     return output_df
+
+
+if __name__ == "__main__":
+    jsonlist = [{"id": i, "text": "Hello World"} for i in range(1000)]
+    def work_func(item):
+        item["text"] = item["text"].upper()
+        return item
+    results = xmap(jsonlist, work_func, output_path="output.jsonl", batch_size=2)
+    print(results)
