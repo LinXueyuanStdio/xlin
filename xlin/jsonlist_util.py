@@ -1,6 +1,6 @@
 from collections import defaultdict
 import json
-from typing import *
+from typing_extensions import *
 
 from pathlib import Path
 from loguru import logger
