@@ -3,7 +3,7 @@ import time
 import os
 import multiprocessing
 from multiprocessing.pool import ThreadPool
-from typing import *
+from typing_extensions import *
 
 import pandas as pd
 from pathlib import Path
