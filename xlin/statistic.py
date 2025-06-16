@@ -1,5 +1,5 @@
 import sys
-from typing import List, Optional
+from typing_extensions import List, Optional
 from collections import Counter, defaultdict
 
 import pandas as pd
