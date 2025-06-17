@@ -67,10 +67,30 @@ def is_jsonl(filepath: str):
         else:
             return True  # 第一行是json，所以是jsonl格式
 
+
 def load_text(filename):
     with open(filename, 'r') as f:
         return f.read()
 
+
+def save_text(text: str, filename: str):
+    with open(filename, 'w') as f:
+        f.write(text)
+
+
+def append_line_to_text(text: str, filename: str):
+    """
+    Append a line of text to a file.
+    If the file does not exist, it will be created.
+    """
+    with open(filename, 'a') as f:
+        # 查看文件末尾是否为换行符
+        if f.tell() > 0:  # 如果文件不为空，则添加换行符
+            f.seek(0, 2)  # 移动到文件末尾
+            if f.tell() > 0 and f.read(1) != "\n":  # 如果最后一个字符不是换行符
+                f.write("\n")
+        # 写入文本
+        f.write(text + "\n")
 
 def load_json_or_jsonl(filepath: str):
     """
