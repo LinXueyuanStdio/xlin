@@ -35,17 +35,20 @@ async def test_xmap_benchmark():
         return item
 
     def slow_work_func(item):
+        print(f"start {item['id']}")
         item = fast_work_func(item)
-        process_time = random.uniform(1, 2)
-        time.sleep(process_time)  # 模拟处理延迟
+        time.sleep(random.randint(2, 10))  # 模拟处理延迟
+        print(f"end {item['id']}")
         return item
 
     def batch_work_func(items):
         return [slow_work_func(item) for item in items]
 
     async def async_work_func(item):
+        print(f"start {item['id']}")
         item = fast_work_func(item)
-        await asyncio.sleep(random.uniform(1, 2))
+        await asyncio.sleep(random.randint(2, 10))
+        print(f"end {item['id']}")
         return item
 
     async def async_batch_work_func(items):
@@ -53,7 +56,7 @@ async def test_xmap_benchmark():
 
     # 临时输出路径
     output_path = Path("test_output.jsonl")
-    max_workers = 4
+    max_workers = 16
     batch_size = 4
 
     # 测试普通for循环
