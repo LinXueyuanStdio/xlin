@@ -69,6 +69,9 @@ def is_jsonl(filepath: str):
 
 
 def load_text(filename):
+    path = Path(filename)
+    if not path.exists():
+        return ""
     with open(filename, 'r') as f:
         return f.read()
 
