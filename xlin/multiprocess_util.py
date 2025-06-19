@@ -143,9 +143,9 @@ async def xmap_async(
         3. 异步单个处理函数:
             ```python
             async def async_process_item(item):
-            # 异步处理单个项目
-            await asyncio.sleep(0.1)  # 模拟异步操作
-            return {"id": item["id"], "value": item["value"] * 2}
+                # 异步处理单个项目
+                await asyncio.sleep(0.1)  # 模拟异步操作
+                return {"id": item["id"], "value": item["value"] * 2}
 
             results = await xmap_async(jsonlist, async_process_item, is_async_work_func=True)
             ```
@@ -204,24 +204,26 @@ async def xmap_async(
         result_queue = asyncio.Queue()
 
         async def task_fn(index: int, item: Any | list[Any]):
-            async with sem:
-                # 实现重试逻辑
-                for retry_step_idx in range(retry_count + 1):
-                    try:
-                        result = await submit_task(index, item)
+            print(f"Processing item at index {index}...")
+            # 实现重试逻辑
+            for retry_step_idx in range(retry_count + 1):
+                try:
+                    result = await submit_task(index, item)
+                    async with sem:
                         await result_queue.put(result)
-                        break
-                    except Exception as e:
-                        if retry_step_idx < retry_count:
-                            if verbose:
-                                logger.error(f"处理失败，索引 {index} 重试中 ({retry_step_idx + 1}/{retry_count}): {e}")
-                        else:
-                            if verbose:
-                                logger.error(f"最终失败，无法处理索引 {index} 的项目: {e}")
-                            fallback_result = {"index": index, "error": str(e)}
-                            if is_batch_work_func:
-                                fallback_result = [fallback_result] * batch_size
-                            # 将错误结果放入队列
+                    break
+                except Exception as e:
+                    if retry_step_idx < retry_count:
+                        if verbose:
+                            logger.error(f"处理失败，索引 {index} 重试中 ({retry_step_idx + 1}/{retry_count}): {e}")
+                    else:
+                        if verbose:
+                            logger.error(f"最终失败，无法处理索引 {index} 的项目: {e}")
+                        fallback_result = {"index": index, "error": str(e)}
+                        if is_batch_work_func:
+                            fallback_result = [fallback_result] * batch_size
+                        # 将错误结果放入队列
+                        async with sem:
                             await result_queue.put((index, fallback_result))
 
 
