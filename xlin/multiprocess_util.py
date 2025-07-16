@@ -183,13 +183,14 @@ async def xmap_async(
     if is_batch_work_func:
         remaining = [remaining[i:i + batch_size] for i in range(0, len(remaining), batch_size)]
 
-    loop = asyncio.get_event_loop()
-    if use_process_pool:
-        executor: Executor = ProcessPoolExecutor(max_workers=max_workers)
-    else:
-        executor = ThreadPoolExecutor(max_workers=max_workers)
+    if not is_async_work_func:
+        loop = asyncio.get_event_loop()
+        if use_process_pool:
+            executor: Executor = ProcessPoolExecutor(max_workers=max_workers)
+        else:
+            executor = ThreadPoolExecutor(max_workers=max_workers)
 
-    async def submit_task(index: int, item: Any):
+    async def working_at_task(index: int, item: Any):
         if is_async_work_func:
             return index, await work_func(item)
         return index, await loop.run_in_executor(executor, work_func, item)
@@ -208,7 +209,7 @@ async def xmap_async(
             # 实现重试逻辑
             for retry_step_idx in range(retry_count + 1):
                 try:
-                    result = await submit_task(index, item)
+                    result = await working_at_task(index, item)
                     async with sem:
                         await result_queue.put(result)
                     break
