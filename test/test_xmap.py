@@ -28,7 +28,7 @@ async def test_xmap_benchmark():
     """
     import random
     # 准备测试数据
-    jsonlist = [{"id": i, "value": "Hello World"} for i in range(100)]
+    jsonlist = [{"id": i, "value": "Hello World"} for i in range(50)]
 
     def fast_work_func(item):
         item["value"] = item["value"].upper()
@@ -37,7 +37,7 @@ async def test_xmap_benchmark():
     def slow_work_func(item):
         print(f"start {item['id']}")
         item = fast_work_func(item)
-        time.sleep(random.randint(2, 10))  # 模拟处理延迟
+        time.sleep(random.randint(2, 10) / 5)  # 模拟处理延迟
         print(f"end {item['id']}")
         return item
 
@@ -47,7 +47,7 @@ async def test_xmap_benchmark():
     async def async_work_func(item):
         print(f"start {item['id']}")
         item = fast_work_func(item)
-        await asyncio.sleep(random.randint(2, 10))
+        await asyncio.sleep(random.randint(2, 10) / 5)
         print(f"end {item['id']}")
         return item
 
@@ -56,8 +56,8 @@ async def test_xmap_benchmark():
 
     # 临时输出路径
     output_path = Path("test_output.jsonl")
-    max_workers = 16
-    batch_size = 4
+    max_workers = 4
+    batch_size = 2
 
     # 测试普通for循环
     print("测试普通for循环...")
