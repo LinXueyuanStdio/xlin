@@ -173,6 +173,8 @@ async def xmap_async(
             else:
                 output_list = load_json_list(output_path)
                 start_idx = len(output_list)
+                if start_idx >= len(jsonlist):
+                    return output_list
                 if verbose:
                     logger.info(f"继续处理: 已有{start_idx}条记录，共{len(jsonlist)}条")
         else:
@@ -186,7 +188,7 @@ async def xmap_async(
     if not is_async_work_func:
         loop = asyncio.get_event_loop()
         if use_process_pool:
-            executor: Executor = ProcessPoolExecutor(max_workers=max_workers)
+            executor = ProcessPoolExecutor(max_workers=max_workers)
         else:
             executor = ThreadPoolExecutor(max_workers=max_workers)
 
@@ -198,20 +200,18 @@ async def xmap_async(
     # 异步调度
     results = []
     pq = []
+    sem = asyncio.Semaphore(max_workers)
+    pbar = asyncio_tqdm(total=len(remaining), desc=desc, unit="it")
+    result_queue = asyncio.Queue()
 
-    async def schedule_items():
-        sem = asyncio.Semaphore(max_workers)
-        pbar = asyncio_tqdm(total=len(remaining), desc=desc, unit="it")
-        result_queue = asyncio.Queue()
-
-        async def task_fn(index: int, item: Any | list[Any]):
-            print(f"Processing item at index {index}...")
-            # 实现重试逻辑
-            for retry_step_idx in range(retry_count + 1):
+    async def task_fn(index: int, item: Any | list[Any]):
+        print(f"Processing item at index {index}...")
+        # 实现重试逻辑
+        for retry_step_idx in range(retry_count + 1):
+            async with sem:
                 try:
                     result = await working_at_task(index, item)
-                    async with sem:
-                        await result_queue.put(result)
+                    await result_queue.put(result)
                     break
                 except Exception as e:
                     if retry_step_idx < retry_count:
@@ -224,53 +224,54 @@ async def xmap_async(
                         if is_batch_work_func:
                             fallback_result = [fallback_result] * batch_size
                         # 将错误结果放入队列
-                        async with sem:
-                            await result_queue.put((index, fallback_result))
+                        await result_queue.put((index, fallback_result))
 
 
-        async def producer():
-            for i, item in enumerate(remaining):
-                index = i + start_idx
-                asyncio.create_task(task_fn(index, item))
+    async def producer():
+        tasks = []
+        for i, item in enumerate(remaining):
+            index = i + start_idx
+            task = asyncio.create_task(task_fn(index, item))
+            tasks.append(task)
+        await asyncio.gather(*tasks)
 
-        asyncio.create_task(producer())
+    asyncio.create_task(producer())
 
-        next_expect = start_idx
+    next_expect = start_idx
 
-        while len(results) + start_idx < len(jsonlist):
-            idx, res = await result_queue.get()
+    while len(results) + start_idx < len(jsonlist):
+        idx, res = await result_queue.get()
 
-            if preserve_order:
-                heapq.heappush(pq, (idx, res))
-                # 保序输出
-                output_buffer = []
-                while pq and pq[0][0] == next_expect:
-                    _, r = heapq.heappop(pq)
-                    if is_batch_work_func:
-                        output_buffer.extend(r)
-                        results.extend(r)
-                    else:
-                        output_buffer.append(r)
-                        results.append(r)
-                    next_expect += 1
-                    pbar.update(1)
+        if preserve_order:
+            heapq.heappush(pq, (idx, res))
+            # 保序输出
+            output_buffer = []
+            while pq and pq[0][0] == next_expect:
+                _, r = heapq.heappop(pq)
+                if is_batch_work_func:
+                    output_buffer.extend(r)
+                else:
+                    output_buffer.append(r)
+                next_expect += 1
+            if output_buffer:
+                results.extend(output_buffer)
+                pbar.update(len(output_buffer))
                 if need_caching:
                     append_to_json_list(output_buffer, output_path)
+        else:
+            # 非保序输出
+            output_buffer = []
+            if is_batch_work_func:
+                output_buffer.extend(res)
             else:
-                # 非保序输出
-                if is_batch_work_func:
-                    results.extend(res)
-                    if need_caching:
-                        append_to_json_list(res, output_path)
-                else:
-                    results.append(res)
-                    if need_caching:
-                        append_to_json_list([res], output_path)
-                pbar.update(1)
+                output_buffer.append(res)
+            if output_buffer:
+                results.extend(output_buffer)
+                pbar.update(len(output_buffer))
+                if need_caching:
+                    append_to_json_list(output_buffer, output_path)
 
-        pbar.close()
-
-    await schedule_items()
+    pbar.close()
     return jsonlist[:start_idx] + results
 
 def xmap(
