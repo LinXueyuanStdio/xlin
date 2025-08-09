@@ -82,6 +82,8 @@ class TaskManager:
         self.max_workers = max_workers
         self.desc = desc
         self.output_path = output_path
+        if self.output_path and not isinstance(self.output_path, Path):
+            self.output_path = Path(output_path)
         self.workers: Dict[str, WorkerInfo] = {}
         self.tasks: Dict[str, TaskInfo] = {}
         self.console = Console()
@@ -359,16 +361,13 @@ class TaskManager:
             footer_content.append(f"\n💾 ", style="bold blue")
 
             # 处理文件路径显示，只显示文件名或缩短的路径
-            display_path = self.output_path or 'output.jsonl'
+            display_path = self.output_path
             if display_path:
                 # 如果路径太长，只显示文件名
-                from pathlib import Path
-                path_obj = Path(display_path)
                 if len(str(display_path)) > 50:  # 如果路径太长
-                    display_path = f".../{path_obj.name}"
-                elif "/" in display_path and not display_path.startswith("./"):
-                    # 如果是相对路径但不以./开头，显示相对路径
-                    display_path = str(display_path)
+                    display_path = self.output_path.name
+                else:
+                    display_path = str(self.output_path)
 
             footer_content.append(f"{display_path} ", style="cyan")
             footer_content.append(f"[{cache_bar}] {cache_progress:.0%} ", style="green")
@@ -655,7 +654,7 @@ async def xmap_async(
     """
     jsonlist = list(jsonlist)
     # 初始化任务管理器
-    task_manager = TaskManager(max_workers, desc)
+    task_manager = TaskManager(max_workers, desc, output_path=output_path)
     task_manager.total_tasks = len(jsonlist)
 
     need_caching = output_path is not None
@@ -845,35 +844,40 @@ async def xmap_async(
 import random
 
 def fast_work_func(item, reporter: TaskReporter):
-    reporter.set_current_state("转换为大写")
-    reporter.set_progress(0.0)
+    if reporter:
+        reporter.set_current_state("转换为大写")
+        reporter.set_progress(0.0)
 
     time.sleep(0.1)  # 模拟工作
-    reporter.set_progress(0.5)
+    if reporter:
+        reporter.set_progress(0.5)
 
     item["value"] = item["value"].upper()
 
-    reporter.set_progress(1.0)
-    reporter.set_current_state("完成")
+    if reporter:
+        reporter.set_progress(1.0)
+        reporter.set_current_state("完成")
     return item
 
 def slow_work_func(item, reporter: TaskReporter):
-    reporter.set_current_state(f"开始处理 {item['id']}")
-    reporter.set_progress(0.0)
+    if reporter:
+        reporter.set_current_state(f"开始处理 {item['id']}")
+        reporter.set_progress(0.0)
 
     # 模拟多步骤处理
     steps = ["预处理", "数据转换", "验证", "后处理", "完成"]
-    delay = random.randint(2, 8)
+    delay = random.randint(2, 10) / 5
 
     for i, step in enumerate(steps):
-        reporter.set_current_state(step)
-        reporter.set_progress(i / len(steps))
+        if reporter:
+            reporter.set_current_state(step)
+            reporter.set_progress(i / len(steps))
         time.sleep(delay / len(steps))
 
     item = fast_work_func(item, reporter)
-    reporter.set_current_state("完成")
-    reporter.set_progress(1.0)
-
+    if reporter:
+        reporter.set_current_state("完成")
+        reporter.set_progress(1.0)
     return item
 
 def batch_work_func(items, reporter: TaskReporter):
@@ -902,7 +906,7 @@ async def async_work_func(item, reporter: TaskReporter):
 
     # 模拟异步多步骤处理
     steps = ["异步预处理", "异步数据转换", "异步验证", "异步后处理"]
-    delay = random.randint(1, 5)
+    delay = random.randint(2, 10) / 5
 
     for i, step in enumerate(steps):
         reporter.set_current_state(step)
@@ -960,8 +964,8 @@ async def test_xmap_benchmark():
     - 保序功能验证结果
     """
     from tqdm import tqdm
-    skip_for = True
-    skip_batch_async = True
+    skip_for = False
+    skip_batch_async = False
     skip_single_async = False
     skip_batch_sync = True
     skip_single_sync = True
@@ -977,7 +981,7 @@ async def test_xmap_benchmark():
 
     if skip_for:
         for_time = 10
-        for_result = [fast_work_func(item) for item in jsonlist]
+        for_result = [fast_work_func(item, None) for item in tqdm(jsonlist)]
     else:
         # 测试普通for循环
         print("测试普通for循环...")
@@ -985,8 +989,8 @@ async def test_xmap_benchmark():
         # 节约时间
         for_result = []
         for item in tqdm(jsonlist):
-            # processed = fast_work_func(item)
-            processed = slow_work_func(item)
+            processed = fast_work_func(item, None)
+            # processed = slow_work_func(item, None)
             for_result.append(processed)
         for_time = time.time() - start_time
         # for_result = [{"id": i, "text": "Hello World".upper()} for i in range(100)]
@@ -996,7 +1000,7 @@ async def test_xmap_benchmark():
     # 测试xmap函数 - 非批量模式
     if skip_single_sync:
         xmap_time = 10  # 模拟耗时
-        xmap_result = [fast_work_func(item.copy()) for item in jsonlist]
+        xmap_result = [fast_work_func(item.copy(), None) for item in tqdm(jsonlist)]
         print(f"跳过xmap函数 (非批量模式) 测试，使用模拟耗时: {xmap_time:.4f}秒")
     else:
         print("\n测试xmap函数 (非批量模式)...")
@@ -1021,7 +1025,7 @@ async def test_xmap_benchmark():
     # 测试xmap函数 - 批量模式
     if skip_batch_sync:
         xmap_batch_time = 8  # 模拟耗时
-        xmap_batch_result = [fast_work_func(item.copy()) for item in jsonlist]
+        xmap_batch_result = [fast_work_func(item.copy(), None) for item in tqdm(jsonlist)]
         print(f"跳过xmap函数 (批量模式) 测试，使用模拟耗时: {xmap_batch_time:.4f}秒")
     else:
         print("\n测试xmap函数 (批量模式)...")
@@ -1051,7 +1055,7 @@ async def test_xmap_benchmark():
         print("\n测试xmap函数保序功能...")
         start_time = time.time()
 
-        def slow_work_func(item):
+        def slow_work_func2(item, reporter: TaskReporter):
             # 添加随机延迟模拟不同处理时间，延迟与ID成反比，让后面的元素先完成
             import random
             delay = 0.001 * (1000 - item["id"]) / 1000.0  # 后面的ID处理更快
@@ -1063,7 +1067,7 @@ async def test_xmap_benchmark():
         test_data = jsonlist[:100]  # 使用较少数据进行测试
         xmap_ordered_result = await xmap_async(
             jsonlist=test_data,
-            work_func=slow_work_func,
+            work_func=slow_work_func2,
             preserve_order=True,
             max_workers=max_workers,
             use_process_pool=False,
@@ -1072,7 +1076,7 @@ async def test_xmap_benchmark():
         )
         xmap_unordered_result = await xmap_async(
             jsonlist=test_data,
-            work_func=slow_work_func,
+            work_func=slow_work_func2,
             preserve_order=False,
             max_workers=max_workers,
             use_process_pool=False,
@@ -1112,7 +1116,7 @@ async def test_xmap_benchmark():
     # 测试异步xmap函数 - 非批量模式
     if skip_single_async:
         async_xmap_time = 6  # 模拟耗时
-        async_xmap_result = [fast_work_func(item.copy()) for item in jsonlist]
+        async_xmap_result = [fast_work_func(item.copy(), None) for item in tqdm(jsonlist)]
         print(f"跳过异步xmap函数 (非批量模式) 测试，使用模拟耗时: {async_xmap_time:.4f}秒")
     else:
         print("\n测试异步xmap函数 (非批量模式)...")
@@ -1137,7 +1141,7 @@ async def test_xmap_benchmark():
     # 测试异步xmap函数 - 批量模式
     if skip_batch_async:
         async_xmap_batch_time = 4  # 模拟耗时
-        async_xmap_batch_result = [fast_work_func(item.copy()) for item in jsonlist]
+        async_xmap_batch_result = [fast_work_func(item.copy(), None) for item in tqdm(jsonlist)]
         print(f"跳过异步xmap函数 (批量模式) 测试，使用模拟耗时: {async_xmap_batch_time:.4f}秒")
     else:
         print("\n测试异步xmap函数 (批量模式)...")
@@ -1198,10 +1202,6 @@ async def test_xmap_benchmark():
     else:
         print(f"{'异步xmap(批量)':<20} {async_xmap_batch_time:.4f} {for_time/async_xmap_batch_time:.2f}x")
 
-
-if __name__ == "__main__":
-  asyncio.run(test_xmap_benchmark())
-
 # 示例用法
 async def main():
     # 创建测试数据
@@ -1225,6 +1225,8 @@ async def main():
     )
 
     print(f"\n✅ 处理完成！共处理 {len(results)} 个项目")
+
+    await test_xmap_benchmark()
 
 if __name__ == "__main__":
     asyncio.run(main())
