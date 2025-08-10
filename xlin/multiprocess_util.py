@@ -205,9 +205,10 @@ async def xmap_async(
     result_queue = asyncio.Queue()
 
     async def task_fn(index: int, item: Any | list[Any]):
-        print(f"Processing item at index {index}...")
         # 实现重试逻辑
         for retry_step_idx in range(retry_count + 1):
+            if verbose:
+                print(f"Processing item at index {index}..." + ("" if retry_step_idx == 0 else f" (retry {retry_step_idx})"))
             async with sem:
                 try:
                     result = await working_at_task(index, item)
