@@ -187,8 +187,12 @@ def load_json(filename: str):
 
 
 def save_json(json_list: Union[Dict[str, str], List[Dict[str, str]]], filename: str):
-    Path(filename).parent.mkdir(parents=True, exist_ok=True)
-    with open(filename, "w", encoding="utf-8") as f:
+    filepath = Path(filename)
+    if filepath.is_dir():
+        filepath = filepath / "output.json"
+        logger.warning(f"输出路径为目录，自动保存到文件: {filepath}")
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    with open(filepath, "w", encoding="utf-8") as f:
         return json.dump(json_list, f, ensure_ascii=False, separators=(",", ":"), indent=2)
 
 
@@ -373,3 +377,16 @@ def grouped_row_in_jsonlist(jsonlist: List[Dict[str, Any]], key_col="query"):
         grouped[row[key_col]].append(row)
     return grouped
 
+
+def save_to_cache(data: list[dict], output_path: Path, cache_id: str, verbose: bool):
+    if output_path.is_file():
+        append_to_json_list(data, output_path)
+    else:
+        for item in data:
+            item_id = item.get(cache_id)
+            if item_id is None:
+                if verbose:
+                    logger.warning(f"跳过未包含 {cache_id} 的结果: \n{json.dumps(item, ensure_ascii=False, indent=2)}")
+                continue
+            item_cache_path = output_path / f"{item_id}.json"
+            save_json(item, item_cache_path)
