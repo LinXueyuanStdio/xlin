@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 import os
 import multiprocessing
@@ -13,9 +14,9 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Executor
 from tqdm.asyncio import tqdm as asyncio_tqdm
 import heapq
 
-from xlin.jsonlist_util import append_to_json_list, dataframe_to_json_list, load_json_list, row_to_json, save_json_list, load_json, save_json
+from xlin.jsonlist_util import append_to_json_list, dataframe_to_json_list, load_json_list, row_to_json, save_json_list, load_json, save_json, save_to_cache
 from xlin.dataframe_util import read_as_dataframe
-from xlin.file_util import ls
+from xlin.file_util import ls, rm
 
 
 def element_mapping(
@@ -96,6 +97,7 @@ async def xmap_async(
     batch_size=32,  # 批量处理大小
     is_async_work_func=False,  # 是否异步函数
     verbose=False,  # 是否打印详细信息
+    cache_id: str = "uuid",  # 用于唯一标识处理结果的键，用于缓存
 ):
     """xmap_async 是 xmap 的异步版本，使用 async/await 实现高性能并发处理。
     特别适用于 I/O 密集型任务，如网络请求、文件操作等。支持处理过程中的实时缓存。
@@ -119,6 +121,7 @@ async def xmap_async(
         batch_size (int): 批量处理大小，默认为32. 仅当`is_batch_work_func`为True时有效
         is_async_work_func (bool): 是否异步函数，默认为False
         verbose (bool): 是否打印详细信息，默认为False
+        cache_id (str): 用于唯一标识处理结果的键，用于缓存，默认为"uuid"
 
     Returns:
         list[Any]: 处理后的结果列表，包含原始数据和处理结果
@@ -159,26 +162,80 @@ async def xmap_async(
             ```
     """
     need_caching = output_path is not None
-    output_list = []
+    output_list: list[dict] = []
     start_idx = 0
 
     # 处理缓存
     if need_caching:
+        if not preserve_order:
+            # 不保序时，缓存依赖于 cache_id 来跟踪缓存进度，必须保证每个 item 的 cache_id 唯一
+            assert cache_id is not None, "缓存时必须提供唯一标识符来跟踪缓存进度"
+            assert all(item.get(cache_id) is not None for item in jsonlist), "所有项都必须包含唯一标识符"
+            assert len(set(item.get(cache_id) for item in jsonlist)) == len(jsonlist), "所有项的唯一标识符必须唯一，避免冲突"
         output_path = Path(output_path)
         if output_path.exists():
             if force_overwrite:
-                if verbose:
-                    logger.warning(f"强制覆盖输出文件: {output_path}")
-                output_path.unlink()
+                if output_path.is_file():
+                    if verbose:
+                        logger.warning(f"强制覆盖输出文件: {output_path}")
+                    output_path.unlink()
+                else:
+                    if verbose:
+                        logger.warning(f"强制覆盖输出目录: {output_path}")
+                    rm(output_path)
             else:
-                output_list = load_json_list(output_path)
-                start_idx = len(output_list)
+                if output_path.is_file():
+                    output_list = load_json_list(output_path)
+                    start_idx = len(output_list)
+                    if not preserve_order:
+                        # 如果不需要保序输出，则按 output_list 将已经处理的项从 jsonlist 中移动到前面，确保 start_idx 之后的项为未处理项
+                        processed_ids = {item.get(cache_id) for item in output_list}
+                        jsonlist_with_new_order = []
+                        for item in jsonlist:
+                            item_id = item.get(cache_id)
+                            if item_id in processed_ids:
+                                # 已处理的项放到前面
+                                jsonlist_with_new_order.insert(0, item)
+                            else:
+                                # 未处理的项放到后面
+                                jsonlist_with_new_order.append(item)
+                        jsonlist = jsonlist_with_new_order
+                else:
+                    files = ls(output_path, filter=lambda f: f.name.endswith(".json"))
+                    id2path = {f.name[:-5]: f for f in files}
+                    jsonlist_with_new_order = []
+                    for item in jsonlist:
+                        item_id = item.get(cache_id)
+                        if not preserve_order:
+                            if item_id in processed_ids:
+                                # 已处理的项放到前面
+                                jsonlist_with_new_order.insert(0, item)
+                            else:
+                                # 未处理的项放到后面
+                                jsonlist_with_new_order.append(item)
+                        if item_id in id2path:
+                            item_cache_path = id2path[item_id]
+                            output_list.append(load_json(item_cache_path))
+                            start_idx += 1
+                        else:
+                            if preserve_order:
+                                # 如果需要保序输出，但缓存中没有该项，则跳过
+                                break
+                            # 如果不需要保序输出，则可以继续处理
+                            output_list.append(item)
+                            start_idx += 1
+                    if not preserve_order:
+                        jsonlist = jsonlist_with_new_order
+
                 if start_idx >= len(jsonlist):
                     return output_list
                 if verbose:
                     logger.info(f"继续处理: 已有{start_idx}条记录，共{len(jsonlist)}条")
         else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if output_path.name.endswith(".json") or output_path.name.endswith(".jsonl"):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                output_path.mkdir(parents=True, exist_ok=True)
 
     # 准备要处理的数据
     remaining = jsonlist[start_idx:]
@@ -198,7 +255,7 @@ async def xmap_async(
         return index, await loop.run_in_executor(executor, work_func, item)
 
     # 异步调度
-    results = []
+    results: list[dict] = []
     pq = []
     sem = asyncio.Semaphore(max_workers)
     pbar = asyncio_tqdm(total=len(remaining), desc=desc, unit="it")
@@ -258,7 +315,7 @@ async def xmap_async(
                 results.extend(output_buffer)
                 pbar.update(len(output_buffer))
                 if need_caching:
-                    append_to_json_list(output_buffer, output_path)
+                    save_to_cache(output_buffer, output_path, cache_id, verbose)
         else:
             # 非保序输出
             output_buffer = []
@@ -270,7 +327,7 @@ async def xmap_async(
                 results.extend(output_buffer)
                 pbar.update(len(output_buffer))
                 if need_caching:
-                    append_to_json_list(output_buffer, output_path)
+                    save_to_cache(output_buffer, output_path, cache_id, verbose)
 
     pbar.close()
     return jsonlist[:start_idx] + results
@@ -295,6 +352,7 @@ def xmap(
     batch_size=8,  # 批量处理大小，仅当`is_batch_work_func`为True时有效
     is_async_work_func=False,  # 是否异步处理函数
     verbose=False,  # 是否打印详细信息
+    cache_id: str = "uuid",  # 用于唯一标识处理结果的键，用于缓存
 ):
     """高效处理JSON列表，支持多进程/多线程
 
@@ -317,9 +375,10 @@ def xmap(
         batch_size (int): 批量处理大小，默认为32. 仅当`is_batch_work_func`为True时有效
         is_async_work_func (bool): 是否异步函数，默认为False
         verbose (bool): 是否打印详细信息，默认为False
+        cache_id (str): 用于唯一标识处理结果的键，用于缓存
 
     Returns:
-        list[Any]: 处理后的结果列表，包含原始数据和处理结果
+        list[dict]: 处理后的结果列表，包含原始数据和处理结果
 
     Examples:
         1. 同步单个处理函数:
@@ -341,9 +400,9 @@ def xmap(
         3. 异步单个处理函数:
             ```python
             async def async_process_item(item):
-            # 异步处理单个项目
-            await asyncio.sleep(0.1)  # 模拟异步操作
-            return {"id": item["id"], "value": item["value"] * 2}
+                # 异步处理单个项目
+                await asyncio.sleep(0.1)  # 模拟异步操作
+                return {"id": item["id"], "value": item["value"] * 2}
 
             results = xmap(jsonlist, async_process_item, is_async_work_func=True)
             ```
@@ -371,6 +430,7 @@ def xmap(
             batch_size=batch_size,
             is_async_work_func=is_async_work_func,
             verbose=verbose,
+            cache_id=cache_id,
         )
     )
 
