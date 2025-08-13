@@ -20,7 +20,8 @@ from rich.columns import Columns
 from rich.rule import Rule
 from rich.console import Group
 
-from xlin.jsonlist_util import append_to_json_list, load_json_list
+from xlin.file_util import ls, rm
+from xlin.jsonlist_util import append_to_json_list, load_json, load_json_list, save_to_cache
 
 
 @dataclass
@@ -407,6 +408,7 @@ async def xmap_async(
     batch_size=32,  # 批量处理大小
     is_async_work_func=False,  # 是否异步函数
     verbose=False,  # 是否打印详细信息
+    cache_id: str = "uuid",  # 用于唯一标识处理结果的键，用于缓存
 ):
     """高性能异步数据处理函数，支持可视化进度监控和批次处理。
 
@@ -495,6 +497,9 @@ async def xmap_async(
 
         verbose (bool, optional):
             是否输出详细的日志信息，包括错误和重试信息。默认为 False。
+
+        cache_id (str, optional):
+            用于唯一标识处理结果的键，用于缓存。默认为 "uuid"。
 
     Returns:
         List[Any]: 处理后的结果列表。结果顺序取决于 preserve_order 参数。
@@ -658,27 +663,80 @@ async def xmap_async(
     task_manager.total_tasks = len(jsonlist)
 
     need_caching = output_path is not None
-    output_list = []
+    output_list: list[dict] = []
     start_idx = 0
 
     # 处理缓存
     if need_caching:
+        if not preserve_order:
+            # 不保序时，缓存依赖于 cache_id 来跟踪缓存进度，必须保证每个 item 的 cache_id 唯一
+            assert cache_id is not None, "缓存时必须提供唯一标识符来跟踪缓存进度"
+            assert all(item.get(cache_id) is not None for item in jsonlist), "所有项都必须包含唯一标识符"
+            assert len(set(item.get(cache_id) for item in jsonlist)) == len(jsonlist), "所有项的唯一标识符必须唯一，避免冲突"
         output_path = Path(output_path)
         if output_path.exists():
             if force_overwrite:
-                if verbose:
-                    logger.warning(f"强制覆盖输出文件: {output_path}")
-                output_path.unlink()
+                if output_path.is_file():
+                    if verbose:
+                        logger.warning(f"强制覆盖输出文件: {output_path}")
+                    output_path.unlink()
+                else:
+                    if verbose:
+                        logger.warning(f"强制覆盖输出目录: {output_path}")
+                    rm(output_path)
             else:
-                output_list = load_json_list(output_path)
-                start_idx = len(output_list)
+                if output_path.is_file():
+                    output_list = load_json_list(output_path)
+                    start_idx = len(output_list)
+                    if not preserve_order:
+                        # 如果不需要保序输出，则按 output_list 将已经处理的项从 jsonlist 中移动到前面，确保 start_idx 之后的项为未处理项
+                        processed_ids = {item.get(cache_id) for item in output_list}
+                        jsonlist_with_new_order = []
+                        for item in jsonlist:
+                            item_id = item.get(cache_id)
+                            if item_id in processed_ids:
+                                # 已处理的项放到前面
+                                jsonlist_with_new_order.insert(0, item)
+                            else:
+                                # 未处理的项放到后面
+                                jsonlist_with_new_order.append(item)
+                        jsonlist = jsonlist_with_new_order
+                else:
+                    files = ls(output_path, filter=lambda f: f.name.endswith(".json"))
+                    id2path = {f.name[:-5]: f for f in files}
+                    jsonlist_with_new_order = []
+                    for item in jsonlist:
+                        item_id = item.get(cache_id)
+                        if not preserve_order:
+                            if item_id in processed_ids:
+                                # 已处理的项放到前面
+                                jsonlist_with_new_order.insert(0, item)
+                            else:
+                                # 未处理的项放到后面
+                                jsonlist_with_new_order.append(item)
+                        if item_id in id2path:
+                            item_cache_path = id2path[item_id]
+                            output_list.append(load_json(item_cache_path))
+                            start_idx += 1
+                        else:
+                            if preserve_order:
+                                # 如果需要保序输出，但缓存中没有该项，则跳过
+                                break
+                            # 如果不需要保序输出，则可以继续处理
+                            output_list.append(item)
+                            start_idx += 1
+                    if not preserve_order:
+                        jsonlist = jsonlist_with_new_order
+
                 if start_idx >= len(jsonlist):
                     return output_list
-                task_manager.cached_tasks = start_idx
                 if verbose:
                     logger.info(f"继续处理: 已有{start_idx}条记录，共{len(jsonlist)}条")
         else:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if output_path.name.endswith(".json") or output_path.name.endswith(".jsonl"):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                output_path.mkdir(parents=True, exist_ok=True)
 
     # 准备要处理的数据
     remaining = jsonlist[start_idx:]
@@ -718,7 +776,7 @@ async def xmap_async(
             raise
 
     # 异步调度
-    results = []
+    results: list[dict] = []
     pq = []
 
     sem = asyncio.Semaphore(max_workers)
@@ -783,7 +841,7 @@ async def xmap_async(
 
                 results.extend(output_buffer)
                 if need_caching and output_buffer:
-                    append_to_json_list(output_buffer, output_path)
+                    save_to_cache(output_buffer, output_path, cache_id, verbose)
                     task_manager.cached_tasks += len(output_buffer)
                     # 更新缓存进度
                     if output_path and Path(output_path).exists():
@@ -794,7 +852,7 @@ async def xmap_async(
                 if is_batch_work_func:
                     results.extend(res)
                     if need_caching:
-                        append_to_json_list(res, output_path)
+                        save_to_cache(res, output_path, cache_id, verbose)
                         task_manager.cached_tasks += len(res)
                         # 更新缓存进度
                         if output_path and Path(output_path).exists():
@@ -803,7 +861,7 @@ async def xmap_async(
                 else:
                     results.append(res)
                     if need_caching:
-                        append_to_json_list([res], output_path)
+                        save_to_cache([res], output_path, cache_id, verbose)
                         task_manager.cached_tasks += 1
                         # 更新缓存进度
                         if output_path and Path(output_path).exists():
@@ -839,6 +897,296 @@ async def xmap_async(
         executor.shutdown(wait=True)
 
     return jsonlist[:start_idx] + results
+
+
+
+def xmap(
+    jsonlist: list[Any],
+    work_func: Union[
+      Callable[[Any, TaskReporter], dict],
+      Callable[[list[Any], TaskReporter], list[dict]],
+      Awaitable[Callable[[Any, TaskReporter], dict]],
+      Awaitable[Callable[[list[Any], TaskReporter], list[dict]]],
+    ],
+    output_path: Optional[Union[str, Path]] = None,
+    *,
+    desc: str = "Processing",
+    max_workers=8,  # 最大工作线程数
+    use_process_pool=True,  # CPU密集型任务时设为True
+    preserve_order=True,  # 是否保持结果顺序
+    retry_count=0,  # 失败重试次数
+    force_overwrite=False,  # 是否强制覆盖输出文件
+    is_batch_work_func=False,  # 是否批量处理函数
+    batch_size=32,  # 批量处理大小
+    is_async_work_func=False,  # 是否异步函数
+    verbose=False,  # 是否打印详细信息
+    cache_id: str = "uuid",  # 用于唯一标识处理结果的键，用于缓存
+):
+    """高性能异步数据处理函数，支持可视化进度监控和批次处理。
+
+    xmap_async 提供了一个强大的异步数据处理框架，具有以下特性：
+    - 🚀 高并发异步处理，支持同步/异步工作函数
+    - 📊 实时可视化进度监控，类似 nvitop 的界面风格
+    - 📦 支持批次处理和单项处理两种模式
+    - 💾 自动缓存处理结果到 JSONL 文件
+    - 🔄 支持任务重试和错误处理
+    - ⚡ 自适应工作线程管理和负载均衡
+
+    ## work_func 样例
+
+    ### 单项处理函数：
+    ```python
+    def work_func(item: Any, reporter: TaskReporter) -> Any:
+        # 处理单个数据项
+        reporter.set_current_state("处理中...")
+        reporter.set_progress(0.5)
+        # 处理逻辑
+        return processed_item
+    ```
+
+    ### 批次处理函数：
+    ```python
+    def batch_work_func(batch: List[Any], reporter: TaskReporter) -> List[Any]:
+        # 处理一批数据项
+        batch_size = len(batch)
+        results = []
+        for i, item in enumerate(batch):
+            # 处理单个项目
+            results.append(processed_item)
+            reporter.set_progress((i + 1) / batch_size)
+        return results
+    ```
+
+    Args:
+        jsonlist (List[Any]): 要处理的数据列表，支持任意数据类型
+
+        work_func (Callable): 工作函数，必须接受两个参数：
+            - item/batch: 单个数据项或数据批次
+            - reporter: TaskReporter 实例，用于上报进度
+            支持四种函数类型：
+            - 同步单项: (item, reporter) -> Any
+            - 同步批次: (List[item], reporter) -> List[Any]
+            - 异步单项: async (item, reporter) -> Any
+            - 异步批次: async (List[item], reporter) -> List[Any]
+
+        output_path (Optional[Union[str, Path]], optional):
+            输出文件路径，支持 JSONL 格式。如果为 None 则不保存文件。
+            默认为 None。
+
+        desc (str, optional):
+            任务描述，显示在进度条标题中。默认为 "Processing"。
+
+        max_workers (int, optional):
+            最大并发工作线程数。对于 I/O 密集型任务建议 8-32，
+            对于 CPU 密集型任务建议设为 CPU 核心数。默认为 8。
+
+        use_process_pool (bool, optional):
+            是否使用进程池。True 适用于 CPU 密集型任务，
+            False 适用于 I/O 密集型任务。默认为 True。
+
+        preserve_order (bool, optional):
+            是否保持输出结果的顺序与输入一致。True 会消耗更多内存，
+            但保证顺序；False 性能更好但顺序可能变化。默认为 True。
+
+        retry_count (int, optional):
+            任务失败时的重试次数。0 表示不重试。默认为 0。
+
+        force_overwrite (bool, optional):
+            是否强制覆盖已存在的输出文件。False 会在文件存在时抛出异常。
+            默认为 False。
+
+        is_batch_work_func (bool, optional):
+            工作函数是否为批次处理函数。True 时会将数据按 batch_size
+            分组后传递给工作函数。默认为 False。
+
+        batch_size (int, optional):
+            批次处理时每批的数据量。仅在 is_batch_work_func=True 时生效。
+            默认为 32。
+
+        is_async_work_func (bool, optional):
+            工作函数是否为异步函数。True 时会使用 await 调用工作函数。
+            默认为 False。
+
+        verbose (bool, optional):
+            是否输出详细的日志信息，包括错误和重试信息。默认为 False。
+
+        cache_id (str, optional):
+            用于唯一标识处理结果的键，用于缓存。默认为 "uuid"。
+
+    Returns:
+        List[Any]: 处理后的结果列表。结果顺序取决于 preserve_order 参数。
+                   对于批次处理，返回的是展开后的单项结果列表。
+
+    Raises:
+        FileExistsError: 当 output_path 文件已存在且 force_overwrite=False 时
+        Exception: 工作函数执行过程中的各种异常
+
+    ## 使用示例
+
+    ### 1. 同步单个处理函数
+    ```python
+    def process_item(item, reporter: TaskReporter):
+        # 处理单个项目
+        reporter.set_current_state("处理中...")
+        result = {"id": item["id"], "value": item["value"] * 2}
+        reporter.set_progress(1.0)
+        return result
+
+    results = await xmap_async(jsonlist, process_item)
+    ```
+
+    ### 2. 同步批量处理函数
+    ```python
+    def process_batch(items, reporter: TaskReporter):
+        # 处理批量项目
+        reporter.set_current_state(f"批量处理 {len(items)} 项")
+        results = []
+        for i, item in enumerate(items):
+            results.append({"id": item["id"], "value": item["value"] * 2})
+            reporter.set_progress((i + 1) / len(items))
+        return results
+
+    results = await xmap_async(jsonlist, process_batch, is_batch_work_func=True)
+    ```
+
+    ### 3. 异步单个处理函数
+    ```python
+    async def async_process_item(item, reporter: TaskReporter):
+        # 异步处理单个项目
+        reporter.set_current_state("异步处理中...")
+        await asyncio.sleep(0.1)  # 模拟异步操作
+        result = {"id": item["id"], "value": item["value"] * 2}
+        reporter.set_progress(1.0)
+        return result
+
+    results = await xmap_async(jsonlist, async_process_item, is_async_work_func=True)
+    ```
+
+    ### 4. 异步批量处理函数
+    ```python
+    async def async_process_batch(items, reporter: TaskReporter):
+        # 异步处理批量项目
+        reporter.set_current_state(f"异步批量处理 {len(items)} 项")
+
+        async def process_single_item(item):
+            await asyncio.sleep(0.01)  # 模拟异步操作
+            return {"id": item["id"], "value": item["value"] * 2}
+
+        results = await asyncio.gather(*[process_single_item(item) for item in items])
+        reporter.set_progress(1.0)
+        return results
+
+    results = await xmap_async(jsonlist, async_process_batch, is_async_work_func=True, is_batch_work_func=True)
+    ```
+
+    ### 5. 简单异步处理
+    ```python
+    import asyncio
+    from rich_xmap import xmap_async, TaskReporter
+
+    async def fetch_data(item, reporter: TaskReporter):
+        reporter.set_current_state("正在获取数据...")
+        # 模拟异步网络请求
+        await asyncio.sleep(0.1)
+        reporter.set_progress(1.0)
+        return {"id": item["id"], "data": "fetched"}
+
+    data = [{"id": f"item_{i}"} for i in range(100)]
+    results = await xmap_async(
+        data,
+        fetch_data,
+        desc="获取数据",
+        max_workers=10,
+        is_async_work_func=True
+    )
+    ```
+
+    ### 6. 批次处理示例
+    ```python
+    def process_batch(batch, reporter: TaskReporter):
+        reporter.set_current_state(f"处理批次({len(batch)}项)")
+        results = []
+        for i, item in enumerate(batch):
+            # 批量处理逻辑
+            results.append({"processed": item["value"] * 2})
+            reporter.set_progress((i + 1) / len(batch))
+        return results
+
+    data = [{"value": i} for i in range(1000)]
+    results = await xmap_async(
+        data,
+        process_batch,
+        desc="批次处理",
+        is_batch_work_func=True,
+        batch_size=50,
+        output_path="results.jsonl"
+    )
+    ```
+
+    ### 7. CPU 密集型任务
+    ```python
+    def cpu_intensive_task(item, reporter: TaskReporter):
+        reporter.set_current_state("计算中...")
+        # CPU 密集型计算
+        result = complex_calculation(item)
+        reporter.set_progress(1.0)
+        return result
+
+    results = await xmap_async(
+        data,
+        cpu_intensive_task,
+        desc="CPU计算",
+        use_process_pool=True,  # 使用进程池
+        max_workers=4  # CPU 核心数
+    )
+    ```
+
+    ## 进度监控界面
+
+    函数运行时会显示类似 nvitop 的实时监控界面：
+
+    ```
+    ╭─────────────────────── Task Manager ──────────────────────╮
+    │ 🚀 数据处理 [150/200] 75.0% | ETA: 0:00:30              │
+    ╰───────────────────────────────────────────────────────────╯
+    ╭─────────────── Worker 01 ──────────────╮
+    │ Worker-01 │ 📋 Task-0023... │ 🔄 处理中... │ [████████░░] 80% │ ⏱️ 0:00:15 │ ✅ 45 │
+    ╰────────────────────────────────────────────────────────╯
+    ╭─────────────── Worker 02 ──────────────╮
+    │ Worker-02 │ 💤 Idle        │ 🔄 等待任务... │ [░░░░░░░░░░] 0%  │ ⏱️ --:--:-- │ ✅ 38 │
+    ╰────────────────────────────────────────────────────────╯
+    ╭──────────────────── System Status ────────────────────╮
+    │ 📊 Total: 200 | ✅ 150 | 📁 150 | 👥 Workers: 1🟢/7⚪ │ ⚡ 12.5/s │ ⏰ 0:02:15 │
+    │ 💾 results.jsonl [██████████████░░░░░░] 75% (1.2MB/1.6MB)                      │
+    ╰─────────────────────────────────────────────────────────╯
+    ```
+
+    ## 性能建议
+
+    - **I/O 密集型任务**：设置 use_process_pool=False，max_workers=8-32
+    - **CPU 密集型任务**：设置 use_process_pool=True，max_workers=CPU核心数
+    - **大数据量**：使用批次处理，batch_size=32-128
+    - **实时性要求高**：设置 preserve_order=False
+    - **网络请求**：设置合适的 retry_count，通常 2-3 次
+    """
+    return asyncio.run(
+        xmap_async(
+            jsonlist=jsonlist,
+            work_func=work_func,
+            output_path=output_path,
+            desc=desc,
+            max_workers=max_workers,
+            use_process_pool=use_process_pool,
+            preserve_order=preserve_order,
+            retry_count=retry_count,
+            force_overwrite=force_overwrite,
+            is_batch_work_func=is_batch_work_func,
+            batch_size=batch_size,
+            is_async_work_func=is_async_work_func,
+            verbose=verbose,
+            cache_id=cache_id,
+        )
+    )
 
 
 import random
