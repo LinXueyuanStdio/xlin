@@ -1,6 +1,11 @@
 import asyncio
 from collections import defaultdict
-from typing_extensions import Callable, Dict, List, Optional, Union
+import multiprocessing
+from multiprocessing.pool import ThreadPool
+import os
+import time
+from tqdm import tqdm
+from typing_extensions import Callable, Dict, List, Optional, Union, Tuple
 from pathlib import Path
 from loguru import logger
 
@@ -8,7 +13,8 @@ import pandas as pd
 import pyexcel
 
 from xlin.file_util import ls
-from xlin.jsonlist_util import dataframe_to_json_list, load_json, load_json_list, save_json_list
+from xlin.jsonlist_util import append_to_json_list, dataframe_to_json_list, load_json, load_json_list, row_to_json, save_json_list
+from xlin.multiprocess_util import element_mapping
 from xlin.xlsx_util import is_xslx
 
 
@@ -81,14 +87,7 @@ def read_as_dataframe(
             raise ValueError("读取 .db 文件需要提供 sheet_name 作为表名")
         df = pd.read_sql_table(sheet_name, f"sqlite:///{filepath}")
     else:
-        raise ValueError(
-            (
-                f"Unsupported filetype {filepath}. filetype not in \n"
-                "[json, jsonl, xlsx, xls, csv, "
-                "parquet, feather, pkl, h5, txt, "
-                "tsv, xml, html, db]"
-            )
-        )
+        raise ValueError((f"Unsupported filetype {filepath}. filetype not in \n" "[json, jsonl, xlsx, xls, csv, " "parquet, feather, pkl, h5, txt, " "tsv, xml, html, db]"))
     if fill_empty_str_to_na:
         df.fillna("", inplace=True)
     return df
@@ -181,13 +180,9 @@ def lazy_build_dataframe(
         if filetype == "xlsx":
             df.to_excel(output_filepath.parent / f"{filename}.xlsx", index=False)
         elif filetype == "json":
-            save_json_list(
-                dataframe_to_json_list(df), output_filepath.parent / f"{filename}.json"
-            )
+            save_json_list(dataframe_to_json_list(df), output_filepath.parent / f"{filename}.json")
         elif filetype == "jsonl":
-            save_json_list(
-                dataframe_to_json_list(df), output_filepath.parent / f"{filename}.jsonl"
-            )
+            save_json_list(dataframe_to_json_list(df), output_filepath.parent / f"{filename}.jsonl")
         else:
             logger.warning(f"不认识的 {filetype}，默认保存为 xlsx")
             df.to_excel(output_filepath.parent / f"{filename}.xlsx", index=False)
@@ -223,13 +218,9 @@ def merge_multiple_df_dict(list_of_df_dict: List[Dict[str, pd.DataFrame]], sort=
     for df_dict in list_of_df_dict:
         for k, df in df_dict.items():
             df_dict_merged[k].append(df)
-    df_dict_merged: Dict[str, pd.DataFrame] = {
-        k: pd.concat(v) for k, v in df_dict_merged.items()
-    }
+    df_dict_merged: Dict[str, pd.DataFrame] = {k: pd.concat(v) for k, v in df_dict_merged.items()}
     if sort:
-        df_dict_merged: Dict[str, pd.DataFrame] = {
-            k: df_dict_merged[k] for k in sorted(df_dict_merged)
-        }
+        df_dict_merged: Dict[str, pd.DataFrame] = {k: df_dict_merged[k] for k in sorted(df_dict_merged)}
     return df_dict_merged
 
 
@@ -270,12 +261,14 @@ def split_dataframe(
         df_list.append(df_i)
     return df_list
 
+
 def append_column(df: pd.DataFrame, query_column: str, output_column: str, transform):
     query = df[query_column].tolist()
     loop = asyncio.get_event_loop()
     result = loop.run_until_complete(transform(query))
     df[output_column] = [str(r) for r in result]
     return df
+
 
 def grouped_col_list(df: pd.DataFrame, key_col="query", value_col="output"):
     grouped = defaultdict(list)
@@ -305,6 +298,7 @@ def grouped_row(df: pd.DataFrame, key_col="query"):
     for i, row in df.iterrows():
         grouped[row[key_col]].append(row)
     return grouped
+
 
 def select_sub_df(
     df: pd.DataFrame,
@@ -357,3 +351,277 @@ def select_sub_df(
         sub_df = pd.DataFrame()
 
     return sub_df
+
+
+# region 和 json、jsonlist 的互操作
+
+
+def dataframe_to_json_list(df: pd.DataFrame):
+    """
+    Args:
+        df (pd.DataFrame): df
+
+    Returns:
+        List[Dict[str, str]]: json list: [{"col1": "xxx", "col2": "xxx", ...}, ...]
+    """
+    json_list = []
+    for i, line in df.iterrows():
+        json_list.append(dict(line))
+    return json_list
+
+
+def transform_dataframe_to_json_list(df: pd.DataFrame, row_transform):
+    """
+    Args:
+        df (pd.DataFrame): df
+        row_transform : lambda row: prompt_template.format(row['query']), "", row['label']
+
+    Returns:
+        List[Dict[str, str]]: json list: [{"instruction": "xxx", "input": "xxx", "output": "xxx"}, ...]
+    """
+    out_list = list()
+    for _, row in df.iterrows():
+        instruction, input, output = row_transform(row)
+        out_list.append({"instruction": instruction, "input": input, "output": output})
+    return out_list
+
+
+def jsonlist_to_dataframe(json_list: List[Dict[str, str]]):
+    """
+    Args:
+        json_list (List[Dict[str, str]]): json list: [{"col1": "xxx", "col2": "xxx", ...}, ...]
+
+    Returns:
+        pd.DataFrame: df
+    """
+    return pd.DataFrame(json_list)
+
+
+# endregion
+
+
+# region 并行处理
+def dataframe_with_row_mapping(
+    df: pd.DataFrame,
+    mapping_func: Callable[[dict], Tuple[bool, dict]],
+    use_multiprocessing=True,
+    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
+):
+    rows = element_mapping(
+        df.iterrows(),
+        lambda x: mapping_func(x[1]),
+        use_multiprocessing,
+        thread_pool_size,
+    )
+    df = pd.DataFrame(rows)
+    return df
+
+
+def multiprocessing_mapping(
+    df: pd.DataFrame,
+    output_path: Optional[Union[str, Path]],
+    partial_func: Callable[[Dict[str, str]], Dict[str, str]],
+    batch_size=multiprocessing.cpu_count(),
+    cache_batch_num=1,
+    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
+):
+    """mapping a column to another column
+
+    Args:
+        df (DataFrame): [description]
+        output_path (Path): 数据量大的时候需要缓存
+        partial_func (function): (Dict[str, str]) -> Dict[str, str]
+        batch_size (int): batch size
+        cache_batch_num (int): cache batch num
+        thread_pool_size (int): thread pool size
+    """
+    need_caching = output_path is not None
+    tmp_list, output_list = list(), list()
+    start_idx = 0
+    if need_caching:
+        output_path = Path(output_path)
+        if output_path.exists():
+            # existed_df = read_as_dataframe(output_path)
+            # start_idx = len(existed_df)
+            # output_list = dataframe_to_json_list(existed_df)
+            # logger.warning(f"Cache found {output_path} has {start_idx} rows. This process will continue at row index {start_idx}.")
+            # logger.warning(f"缓存 {output_path} 存在 {start_idx} 行. 本次处理将从第 {start_idx} 行开始.")
+            pass
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+    pool = ThreadPool(thread_pool_size)
+    logger.debug(f"pool size: {thread_pool_size}, cpu count: {multiprocessing.cpu_count()}")
+    start_time = time.time()
+    last_save_time = start_time
+    for i, line in tqdm(list(df.iterrows())):
+        if i < start_idx:
+            continue
+        line_info: dict = line.to_dict()
+        line_info: Dict[str, str] = {str(k): str(v) for k, v in line_info.items()}
+        tmp_list.append(line_info)
+        if len(tmp_list) == batch_size:
+            results = pool.map(partial_func, tmp_list)
+            output_list.extend([x for x in results])
+            tmp_list = list()
+        if need_caching and (i // batch_size) % cache_batch_num == 0:
+            current_time = time.time()
+            if current_time - last_save_time < 3:
+                # 如果多进程处理太快，为了不让 IO 成为瓶颈拉慢进度，不足 3 秒的批次都忽略，也不缓存中间结果
+                last_save_time = current_time
+                continue
+            output_df = pd.DataFrame(output_list)
+            output_df.to_excel(output_path, index=False)
+            last_save_time = time.time()
+    if len(tmp_list) > 0:
+        results = pool.map(partial_func, tmp_list)
+        output_list.extend([x for x in results])
+    pool.close()
+    output_df = pd.DataFrame(output_list)
+    if need_caching:
+        output_df.to_excel(output_path, index=False)
+    return output_df, output_list
+
+
+def dataframe_mapping(
+    df: pd.DataFrame,
+    row_func: Callable[[dict], dict],
+    output_path: Optional[Union[str, Path]] = None,
+    force_overwrite: bool = False,
+    batch_size=multiprocessing.cpu_count(),
+    cache_batch_num=1,
+    thread_pool_size=int(os.getenv("THREAD_POOL_SIZE", 5)),
+):
+    """mapping a column to another column
+
+    Args:
+        df (DataFrame): [description]
+        row_func (function): (Dict[str, str]) -> Dict[str, str]
+        output_path (Path): 数据量大的时候需要缓存. None 表示不缓存中间结果
+        force_overwrite (bool): 是否强制覆盖 output_path
+        batch_size (int): batch size
+        cache_batch_num (int): cache batch num
+        thread_pool_size (int): thread pool size
+    """
+    need_caching = output_path is not None
+    tmp_list, output_list = list(), list()
+    start_idx = 0
+    if need_caching:
+        output_path = Path(output_path)
+        if output_path.exists() and not force_overwrite:
+            existed_df = read_as_dataframe(output_path)
+            start_idx = len(existed_df)
+            output_list = dataframe_to_json_list(existed_df)
+            logger.warning(f"Cache found that {output_path} has {start_idx} rows. This process will continue at row index {start_idx}.")
+            logger.warning(f"缓存 {output_path} 存在 {start_idx} 行. 本次处理将从第 {start_idx} 行开始.")
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+    pool = ThreadPool(thread_pool_size)
+    logger.debug(f"pool size: {thread_pool_size}, cpu count: {multiprocessing.cpu_count()}")
+    start_time = time.time()
+    last_save_time = start_time
+    with tqdm(total=len(df), desc="Processing", unit="rows") as pbar:
+        for i, line in df.iterrows():
+            pbar.update(1)
+            if i < start_idx:
+                continue
+            line_info: dict = line.to_dict()
+            tmp_list.append(line_info)
+            if len(tmp_list) == batch_size:
+                results = pool.map(row_func, tmp_list)
+                output_list.extend([row_to_json(x) for x in results])
+                tmp_list = list()
+            if need_caching and (i // batch_size) % cache_batch_num == 0:
+                current_time = time.time()
+                if current_time - last_save_time < 3:
+                    # 如果多进程处理太快，为了不让 IO 成为瓶颈拉慢进度，不足 3 秒的批次都忽略，也不缓存中间结果
+                    last_save_time = current_time
+                    continue
+                rows_to_cache = output_list[start_idx:]
+                append_to_json_list(rows_to_cache, output_path)
+                start_idx = len(output_list)
+                last_save_time = time.time()
+            if need_caching:
+                pbar.set_postfix_str(f"Cache: {len(output_list)}/{len(df)}")
+        if len(tmp_list) > 0:
+            results = pool.map(row_func, tmp_list)
+            output_list.extend([row_to_json(x) for x in results])
+        pool.close()
+        if need_caching:
+            rows_to_cache = output_list[start_idx:]
+            append_to_json_list(rows_to_cache, output_path)
+            start_idx = len(output_list)
+            pbar.set_postfix_str(f"Cache: {len(output_list)}/{len(df)}")
+    output_df = pd.DataFrame(output_list)
+    return output_df
+
+
+def dataframe_batch_mapping(
+    df: pd.DataFrame,
+    batch_row_func: Callable[[list[dict]], dict],
+    output_path: Optional[Union[str, Path]] = None,
+    force_overwrite: bool = False,
+    batch_size=multiprocessing.cpu_count(),
+    cache_batch_num=1,
+):
+    """mapping a column to another column
+
+    Args:
+        df (DataFrame): [description]
+        row_func (function): (Dict[str, str]) -> Dict[str, str]
+        output_path (Path): 数据量大的时候需要缓存. None 表示不缓存中间结果
+        force_overwrite (bool): 是否强制覆盖 output_path
+        batch_size (int): batch size
+        cache_batch_num (int): cache batch num
+        thread_pool_size (int): thread pool size
+    """
+    need_caching = output_path is not None
+    tmp_list, output_list = list(), list()
+    start_idx = 0
+    if need_caching:
+        output_path = Path(output_path)
+        if output_path.exists() and not force_overwrite:
+            existed_df = read_as_dataframe(output_path)
+            start_idx = len(existed_df)
+            output_list = dataframe_to_json_list(existed_df)
+            logger.warning(f"Cache found that {output_path} has {start_idx} rows. This process will continue at row index {start_idx}.")
+            logger.warning(f"缓存 {output_path} 存在 {start_idx} 行. 本次处理将从第 {start_idx} 行开始.")
+        else:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+    start_time = time.time()
+    last_save_time = start_time
+    with tqdm(total=len(df), desc="Processing", unit="rows") as pbar:
+        for i, line in df.iterrows():
+            pbar.update(1)
+            if i < start_idx:
+                continue
+            line_info: dict = line.to_dict()
+            tmp_list.append(line_info)
+            if len(tmp_list) == batch_size:
+                results = batch_row_func(tmp_list)
+                output_list.extend([row_to_json(x) for x in results])
+                tmp_list = list()
+            if need_caching and (i // batch_size) % cache_batch_num == 0:
+                current_time = time.time()
+                if current_time - last_save_time < 3:
+                    # 如果多进程处理太快，为了不让 IO 成为瓶颈拉慢进度，不足 3 秒的批次都忽略，也不缓存中间结果
+                    last_save_time = current_time
+                    continue
+                rows_to_cache = output_list[start_idx:]
+                append_to_json_list(rows_to_cache, output_path)
+                start_idx = len(output_list)
+                last_save_time = time.time()
+            if need_caching:
+                pbar.set_postfix_str(f"Cache: {len(output_list)}/{len(df)}")
+        if len(tmp_list) > 0:
+            results = batch_row_func(tmp_list)
+            output_list.extend([row_to_json(x) for x in results])
+        if need_caching:
+            rows_to_cache = output_list[start_idx:]
+            append_to_json_list(rows_to_cache, output_path)
+            start_idx = len(output_list)
+            pbar.set_postfix_str(f"Cache: {len(output_list)}/{len(df)}")
+    output_df = pd.DataFrame(output_list)
+    return output_df
+
+
+# endregion
