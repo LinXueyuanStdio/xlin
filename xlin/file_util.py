@@ -1,11 +1,12 @@
-from typing_extensions import *
+from typing_extensions import Union, List, Callable, Optional
 from pathlib import Path
 import os
 import shutil
 
 from loguru import logger
 
-def auto_retry_to_get_data(retry_times, request, data_key="data", *args, **kwargs):
+
+def auto_retry_to_get_data(retry_times: int, request: Callable, data_key="data", *args, **kwargs):
     if retry_times == 0:
         return {}
     resp = request(*args, **kwargs)
