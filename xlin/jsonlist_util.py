@@ -1,55 +1,12 @@
+from typing_extensions import Union, Optional, Callable, List, Dict, Tuple, Literal, Any
 from collections import defaultdict
 import json
-from typing_extensions import *
 
 from pathlib import Path
 from loguru import logger
-import pandas as pd
 import pyexcel
 
 from xlin.file_util import ls
-from xlin.xlsx_util import is_xslx
-
-
-def dataframe_to_json_list(df: pd.DataFrame):
-    """
-    Args:
-        df (pd.DataFrame): df
-
-    Returns:
-        List[Dict[str, str]]: json list: [{"col1": "xxx", "col2": "xxx", ...}, ...]
-    """
-    json_list = []
-    for i, line in df.iterrows():
-        json_list.append(dict(line))
-    return json_list
-
-
-def transform_dataframe_to_json_list(df: pd.DataFrame, row_transform):
-    """
-    Args:
-        df (pd.DataFrame): df
-        row_transform : lambda row: prompt_template.format(row['query']), "", row['label']
-
-    Returns:
-        List[Dict[str, str]]: json list: [{"instruction": "xxx", "input": "xxx", "output": "xxx"}, ...]
-    """
-    out_list = list()
-    for _, row in df.iterrows():
-        instruction, input, output = row_transform(row)
-        out_list.append({"instruction": instruction, "input": input, "output": output})
-    return out_list
-
-
-def jsonlist_to_dataframe(json_list: List[Dict[str, str]]):
-    """
-    Args:
-        json_list (List[Dict[str, str]]): json list: [{"col1": "xxx", "col2": "xxx", ...}, ...]
-
-    Returns:
-        pd.DataFrame: df
-    """
-    return pd.DataFrame(json_list)
 
 
 def is_jsonl(filepath: str):
@@ -139,13 +96,14 @@ def read_as_json_list(
             return load_json_list(filepath)
         else:
             return [load_json(filepath)]
-
-    elif filename.endswith(".xlsx"):
+    import pandas as pd
+    if filename.endswith(".xlsx"):
         if sheet_name is None:
             df = pd.read_excel(filepath)
         else:
             df = pd.read_excel(filepath, sheet_name)
     elif filename.endswith(".xls"):
+        from xlin.xlsx_util import is_xslx
         if is_xslx(filepath):
             if sheet_name is None:
                 df = pd.read_excel(filepath)
@@ -243,6 +201,7 @@ def jsonlist_dict_summary(jsonlist_dict: Dict[str, List[dict]]):
             "columns": str(list(jsonlist[0].keys())),
         }
         rows.append(row)
+    import pandas as pd
     df = pd.DataFrame(rows)
     return df
 
@@ -342,6 +301,7 @@ def append_to_json_list(data: list[dict], file_path: Union[str, Path]):
 def row_to_json(row: dict) -> dict:
     """Convert a row to a JSON object."""
     new_row = {}
+    import pandas as pd
     for k, v in row.items():
         if isinstance(v, dict):
             new_row[k] = row_to_json(v)
