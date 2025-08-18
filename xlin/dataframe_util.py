@@ -13,7 +13,7 @@ import pandas as pd
 import pyexcel
 
 from xlin.file_util import ls
-from xlin.jsonlist_util import append_to_json_list, dataframe_to_json_list, load_json, load_json_list, row_to_json, save_json_list
+from xlin.jsonlist_util import append_to_json_list, load_json, load_json_list, row_to_json, save_json_list
 from xlin.multiprocess_util import element_mapping
 from xlin.xlsx_util import is_xslx
 
