@@ -1,7 +1,6 @@
 from typing_extensions import Union, List, Callable, Optional
 from pathlib import Path
 import os
-import shutil
 
 from loguru import logger
 
@@ -49,6 +48,7 @@ def copy_file(input_filepath, output_filepath, force_overwrite=False, verbose=Fa
         if verbose:
             logger.warning(f"文件已存在，跳过复制：{output_filepath}")
         return output_filepath
+    import shutil
     shutil.copy(input_filepath, output_filepath, follow_symlinks=True)
     return output_filepath
 
@@ -110,7 +110,8 @@ def cp(
         raise Exception(f"output_dir_path exists and is not a directory: {output_dir_path}")
     if not output_dir_path.exists():
         output_dir_path.mkdir(parents=True, exist_ok=True)
-        logger.warning(f"创建文件夹 {output_dir_path}")
+        if verbose:
+            logger.warning(f"创建文件夹 {output_dir_path}")
     if not base_input_dir.exists():
         raise Exception(f"base_input_dir does not exist: {base_input_dir}")
     if not base_input_dir.is_dir():
