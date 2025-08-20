@@ -4,7 +4,6 @@ import json
 
 from pathlib import Path
 from loguru import logger
-import pyexcel
 
 from xlin.file_util import ls
 
@@ -104,6 +103,7 @@ def read_as_json_list(
             df = pd.read_excel(filepath, sheet_name)
     elif filename.endswith(".xls"):
         from xlin.xlsx_util import is_xslx
+        import pyexcel
         if is_xslx(filepath):
             if sheet_name is None:
                 df = pd.read_excel(filepath)
