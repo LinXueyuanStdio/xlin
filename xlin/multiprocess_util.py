@@ -1,17 +1,13 @@
+from typing_extensions import Any, Callable, Tuple, List, Dict, Awaitable, Optional, Union
 import asyncio
+import heapq
 import os
-from typing_extensions import *
-from multiprocessing.pool import ThreadPool
 
 from pathlib import Path
 from tqdm import tqdm
-from loguru import logger
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from tqdm.asyncio import tqdm as asyncio_tqdm
-import heapq
+from loguru import logger
 
-from xlin.jsonlist_util import load_json_list, load_json, save_to_cache
-from xlin.file_util import ls, rm
 
 
 def element_mapping(
@@ -26,6 +22,7 @@ def element_mapping(
     total = len(items)
 
     if use_multiprocessing:
+        from multiprocessing.pool import ThreadPool
         pool = ThreadPool(thread_pool_size)
         # 使用imap替代map，结合tqdm显示进度
         for ok, row in tqdm(pool.imap(mapping_func, items), total=total, desc="Processing"):
@@ -146,6 +143,7 @@ async def xmap_async(
             results = await xmap_async(jsonlist, async_process_batch, is_async_work_func=True, is_batch_work_func=True)
             ```
     """
+    from xlin.jsonlist_util import load_json_list, load_json, save_to_cache
     need_caching = output_path is not None
     output_list: list[dict] = []
     start_idx = 0
@@ -167,6 +165,7 @@ async def xmap_async(
                 else:
                     if verbose:
                         logger.warning(f"强制覆盖输出目录: {output_path}")
+                    from xlin.file_util import rm
                     rm(output_path)
             else:
                 if output_path.is_file():
@@ -186,6 +185,7 @@ async def xmap_async(
                                 jsonlist_with_new_order.append(item)
                         jsonlist = jsonlist_with_new_order
                 else:
+                    from xlin.file_util import ls
                     files = ls(output_path, filter=lambda f: f.name.endswith(".json"))
                     id2path = {f.name[:-5]: f for f in files}
                     jsonlist_with_new_order = []
@@ -228,6 +228,7 @@ async def xmap_async(
         remaining = [remaining[i:i + batch_size] for i in range(0, len(remaining), batch_size)]
 
     if not is_async_work_func:
+        from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
         loop = asyncio.get_event_loop()
         if use_process_pool:
             executor = ProcessPoolExecutor(max_workers=max_workers)
