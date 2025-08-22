@@ -1,3 +1,4 @@
+import traceback
 from typing_extensions import Any, Callable, Tuple, List, Dict, Awaitable, Optional, Union
 import asyncio
 import heapq
@@ -263,8 +264,8 @@ async def xmap_async(
                             logger.error(f"处理失败，索引 {index} 重试中 ({retry_step_idx + 1}/{retry_count}): {e}")
                     else:
                         if verbose:
-                            logger.error(f"最终失败，无法处理索引 {index} 的项目: {e}")
-                        fallback_result = {"index": index, "error": str(e)}
+                            logger.error(f"最终失败，无法处理索引 {index} 的项目: {e}\n{traceback.format_exc()}")
+                        fallback_result = {"index": index, "error": f"{e}\n{traceback.format_exc()}"}
                         if is_batch_work_func:
                             fallback_result = [fallback_result] * batch_size
                         # 将错误结果放入队列
