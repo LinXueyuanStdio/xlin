@@ -1,3 +1,4 @@
+import traceback
 from typing import *
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
@@ -801,10 +802,10 @@ async def xmap_async(
                             logger.error(f"处理失败，索引 {index} 重试中 ({retry_step_idx + 1}/{retry_count}): {e}")
                     else:
                         if verbose:
-                            logger.error(f"最终失败，无法处理索引 {index} 的项目: {e}")
-                        fallback_result = {"index": index, "error": str(e)}
+                            logger.error(f"最终失败，无法处理索引 {index} 的项目: {e}\n{traceback.format_exc()}")
+                        fallback_result = {"index": index, "error": f"{e}\n{traceback.format_exc()}"}
                         if is_batch_work_func:
-                            fallback_result = [{"index": idx, "error": str(e)} for idx in range(index, index + batch_size)]
+                            fallback_result = [{"index": idx, "error": f"{e}\n{traceback.format_exc()}"} for idx in range(index, index + batch_size)]
                         # 将错误结果放入队列
                         await result_queue.put((index, fallback_result))
                         break
