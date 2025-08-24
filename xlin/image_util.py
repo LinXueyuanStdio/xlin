@@ -1,12 +1,31 @@
 
 import base64
 from io import BytesIO
+from typing import Union
 from loguru import logger
 from PIL import Image, ImageDraw, ImageFont
 import uuid
 import os
 
 import requests
+
+
+def read_as_image(image: Union[str, Image.Image, bytes]) -> Image.Image:
+    if isinstance(image, Image.Image):
+        return image
+    elif isinstance(image, bytes):
+        return Image.open(BytesIO(image))
+    elif isinstance(image, str):
+        if image.startswith("http://") or image.startswith("https://"):
+            return read_image_http_url(image)
+        elif image.startswith("data:image/"):
+            return base64_to_image(image)
+        elif os.path.exists(image):
+            return Image.open(image)
+        else:
+            raise ValueError(f"Invalid image path or URL: {image}")
+    else:
+        raise TypeError("Input must be a file path, URL, base64 string, or PIL Image object.")
 
 
 def read_image_http_url(image_url: str) -> Image.Image:
