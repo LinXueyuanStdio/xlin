@@ -174,7 +174,7 @@ async def xmap_async(
                     start_idx = len(output_list)
                     if not preserve_order:
                         # 如果不需要保序输出，则按 output_list 将已经处理的项从 jsonlist 中移动到前面，确保 start_idx 之后的项为未处理项
-                        processed_ids = {item.get(cache_id) for item in output_list}
+                        processed_ids = {item.get(cache_id) for item in output_list if cache_id in item}
                         jsonlist_with_new_order = []
                         for item in jsonlist:
                             item_id = item.get(cache_id)
@@ -189,6 +189,7 @@ async def xmap_async(
                     from xlin.file_util import ls
                     files = ls(output_path, filter=lambda f: f.name.endswith(".json"))
                     id2path = {f.name[:-5]: f for f in files}
+                    processed_ids = set(id2path.keys())
                     jsonlist_with_new_order = []
                     for item in jsonlist:
                         item_id = item.get(cache_id)
@@ -202,14 +203,13 @@ async def xmap_async(
                         if item_id in id2path:
                             item_cache_path = id2path[item_id]
                             output_list.append(load_json(item_cache_path))
-                            start_idx += 1
                         else:
                             if preserve_order:
                                 # 如果需要保序输出，但缓存中没有该项，则跳过
                                 break
                             # 如果不需要保序输出，则可以继续处理
                             output_list.append(item)
-                            start_idx += 1
+                    start_idx = len(output_list)
                     if not preserve_order:
                         jsonlist = jsonlist_with_new_order
 
