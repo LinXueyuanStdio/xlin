@@ -174,7 +174,7 @@ async def xmap_async(
                     start_idx = len(output_list)
                     if not preserve_order:
                         # 如果不需要保序输出，则按 output_list 将已经处理的项从 jsonlist 中移动到前面，确保 start_idx 之后的项为未处理项
-                        processed_ids = {item.get(cache_id) for item in output_list if cache_id in item}
+                        processed_ids = {item.get(cache_id) for item in output_list if cache_id in item and item.get(cache_id) is not None}
                         jsonlist_with_new_order = []
                         for item in jsonlist:
                             item_id = item.get(cache_id)
