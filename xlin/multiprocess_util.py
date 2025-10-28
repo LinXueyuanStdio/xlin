@@ -283,8 +283,9 @@ async def xmap_async(
     asyncio.create_task(producer())
 
     next_expect = start_idx
+    processed = 0
 
-    while len(results) + start_idx < len(jsonlist):
+    while processed < len(remaining):
         idx, res = await result_queue.get()
 
         if preserve_order:
@@ -298,9 +299,10 @@ async def xmap_async(
                 else:
                     output_buffer.append(r)
                 next_expect += 1
+                pbar.update()
+                processed += 1
             if output_buffer:
                 results.extend(output_buffer)
-                pbar.update(len(output_buffer))
                 if need_caching:
                     save_to_cache(output_buffer, output_path, cache_id, verbose)
         else:
@@ -310,14 +312,17 @@ async def xmap_async(
                 output_buffer.extend(res)
             else:
                 output_buffer.append(res)
+            pbar.update()
+            processed += 1
             if output_buffer:
                 results.extend(output_buffer)
-                pbar.update(len(output_buffer))
                 if need_caching:
                     save_to_cache(output_buffer, output_path, cache_id, verbose)
 
     pbar.close()
-    return jsonlist[:start_idx] + results
+    if start_idx > 0:
+        return output_list + results
+    return results
 
 def xmap(
     jsonlist: list[Any],
