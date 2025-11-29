@@ -181,6 +181,7 @@ def save_json_list(json_list: List[Dict[str, str]], filename: str):
     Path(filename).parent.mkdir(parents=True, exist_ok=True)
     with open(filename, "w", encoding="utf-8") as f:
         f.write("\n".join([json.dumps(line, ensure_ascii=False, separators=(",", ":")) for line in json_list]))
+        f.write("\n")
 
 
 def merge_json_list(filenames: List[str], output_filename: str):
