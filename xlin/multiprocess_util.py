@@ -10,7 +10,6 @@ from tqdm.asyncio import tqdm as asyncio_tqdm
 from loguru import logger
 
 
-
 def element_mapping(
     iterator: list[Any],
     mapping_func: Callable[[Any], Tuple[bool, Any]],
@@ -58,6 +57,17 @@ def batch_mapping(
     rows = [row for batch in rows for row in batch]
     return rows
 
+
+# 包装异步函数以在 executor 中运行
+def run_async_func_in_executor(
+    func: Union[
+        Awaitable[Callable[[Any], dict]],
+        Awaitable[Callable[[list[Any]], list[dict]]],
+    ],
+    item,
+):
+    """在新的事件循环中运行异步函数，用于在 executor 中执行"""
+    return asyncio.run(func(item))
 
 
 async def xmap_async(
@@ -228,18 +238,21 @@ async def xmap_async(
     if is_batch_work_func:
         remaining = [remaining[i:i + batch_size] for i in range(0, len(remaining), batch_size)]
 
-    if not is_async_work_func:
-        from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-        loop = asyncio.get_event_loop()
-        if use_process_pool:
-            executor = ProcessPoolExecutor(max_workers=max_workers)
-        else:
-            executor = ThreadPoolExecutor(max_workers=max_workers)
+    # 始终创建 executor 以支持并发执行
+    from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+    loop = asyncio.get_event_loop()
+    if use_process_pool:
+        executor = ProcessPoolExecutor(max_workers=max_workers)
+    else:
+        executor = ThreadPoolExecutor(max_workers=max_workers)
 
     async def working_at_task(index: int, item: Any):
         if is_async_work_func:
-            return index, await work_func(item)
-        return index, await loop.run_in_executor(executor, work_func, item)
+            # 异步函数也在 executor 中运行，以利用进程池/线程池的并发能力
+            return index, await loop.run_in_executor(executor, run_async_func_in_executor, work_func, item)
+        else:
+            # 同步函数直接在 executor 中运行
+            return index, await loop.run_in_executor(executor, work_func, item)
 
     # 异步调度
     results: list[dict] = []
@@ -270,7 +283,6 @@ async def xmap_async(
                             fallback_result = [fallback_result] * batch_size
                         # 将错误结果放入队列
                         await result_queue.put((index, fallback_result))
-
 
     async def producer():
         tasks = []
