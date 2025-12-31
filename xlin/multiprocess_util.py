@@ -249,7 +249,8 @@ async def xmap_async(
     async def working_at_task(index: int, item: Any):
         if is_async_work_func:
             # 异步函数也在 executor 中运行，以利用进程池/线程池的并发能力
-            return index, await loop.run_in_executor(executor, run_async_func_in_executor, work_func, item)
+            # return index, await loop.run_in_executor(executor, run_async_func_in_executor, work_func, item)
+            return index, await asyncio.to_thread(run_async_func_in_executor, work_func, item)
         else:
             # 同步函数直接在 executor 中运行
             return index, await loop.run_in_executor(executor, work_func, item)
